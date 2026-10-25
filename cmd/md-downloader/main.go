@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/xiiisins/md-downloader/internal/mangadex"
 	"github.com/xiiisins/md-downloader/internal/queue"
 	"github.com/xiiisins/md-downloader/internal/server"
+	"github.com/xiiisins/md-downloader/internal/store"
 )
 
 func main() {
@@ -72,7 +74,9 @@ func main() {
 
 	if *daemon {
 		opts.From, opts.To = -1, -1 // chapter ranges only make sense for a single -manga run
-		if err := queue.RunDaemon(ctx, d, *daemonAddr, *stateDir, opts); err != nil {
+		st := store.OpenFile(filepath.Join(*stateDir, "queue.json"))
+		log.Printf("Queue state in %s", st.Path())
+		if err := queue.RunDaemon(ctx, d, *daemonAddr, st, opts); err != nil {
 			log.Fatal(err)
 		}
 		return
