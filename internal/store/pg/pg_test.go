@@ -68,7 +68,8 @@ func TestLibraryRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	s := open(t, "lib")
 	in := []mangadex.Manga{
-		{ID: "b", Title: "beta", Tags: []string{"x"}, Year: 2020, Cover: "b.jpg"},
+		{ID: "b", Title: "beta", Tags: []string{"x"}, Year: 2020, Cover: "b.jpg",
+			ContentRating: "erotica", TagGroups: map[string]string{"x": "theme"}, Chapters: 12},
 		{ID: "a", Title: "Alpha", Rating: 8.5, Cover: "a.jpg"},
 	}
 	if err := s.ReplaceLibrary(ctx, in); err != nil {
@@ -80,6 +81,9 @@ func TestLibraryRoundTrip(t *testing.T) {
 	out, synced, err := s.Library(ctx)
 	if err != nil || len(out) != 1 || out[0].ID != "b" || out[0].Cover != "b.jpg" || out[0].Year != 2020 || synced.IsZero() {
 		t.Fatalf("Library = %+v, %v, %v", out, synced, err)
+	}
+	if got := out[0]; got.ContentRating != "erotica" || got.TagGroups["x"] != "theme" || got.Chapters != 12 {
+		t.Errorf("new metadata fields lost in the round trip: %+v", got)
 	}
 }
 

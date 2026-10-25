@@ -27,7 +27,13 @@ type cacheEntry struct {
 	CheckKey     string    `json:"checkKey"` // language + ratings the check ran with
 	Checked      time.Time `json:"checked"`
 	Downloadable bool      `json:"downloadable"`
+	Chapters     int       `json:"chapters"` // downloadable chapter count from the same check
 }
+
+// cacheVersion is bumped when cached entries gain fields that older entries
+// lack. A cache written by another version is discarded, so every title's
+// metadata is re-read once.
+const cacheVersion = 2
 
 // Persister stores the cache's serialized form.
 type Persister interface {
@@ -63,6 +69,7 @@ func (f FilePersister) Write(b []byte) error {
 // Cache is the metadata cache.
 type Cache struct {
 	p       Persister
+	Version int                    `json:"version"`
 	Entries map[string]*cacheEntry `json:"entries"`
 }
 
@@ -71,10 +78,14 @@ func LoadCache(p Persister) *Cache {
 	mc := &Cache{p: p, Entries: map[string]*cacheEntry{}}
 	if b, err := p.Read(); err == nil && b != nil {
 		_ = json.Unmarshal(b, mc)
+		if mc.Version != cacheVersion {
+			mc.Entries = nil
+		}
 		if mc.Entries == nil {
 			mc.Entries = map[string]*cacheEntry{}
 		}
 	}
+	mc.Version = cacheVersion
 	return mc
 }
 

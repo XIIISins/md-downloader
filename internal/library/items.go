@@ -52,11 +52,11 @@ func LoadItems(ctx context.Context, c *mangadex.Client, ids []string, lang strin
 			continue
 		}
 		if refresh || e.CheckKey != key || now.Sub(e.Checked) > checkTTL {
-			ok, err := c.HasDownloadable(ctx, id, lang, ratings)
+			n, err := c.DownloadableChapters(ctx, id, lang, ratings)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", e.Item.Title, err)
 			}
-			e.CheckKey, e.Checked, e.Downloadable = key, time.Now(), ok
+			e.CheckKey, e.Checked, e.Downloadable, e.Chapters = key, time.Now(), n > 0, n
 			if checked++; checked%25 == 0 {
 				log.Printf("  checked %d (at %d/%d)", checked, i+1, len(ids))
 			}
@@ -67,6 +67,7 @@ func LoadItems(ctx context.Context, c *mangadex.Client, ids []string, lang strin
 		}
 		it := e.Item
 		it.Cover = e.Cover
+		it.Chapters = e.Chapters
 		items = append(items, it)
 	}
 	if err := mc.save(); err != nil {
