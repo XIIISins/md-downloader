@@ -4,86 +4,65 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>MangaDex Library</title>
+<!-- The app name: change it here; the header shows the same text. -->
+<title>MD Downloader</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<a class="skip" href="#list">Skip to series list</a>
-<header class="top">
-  <div class="bar">
-    <h1>MangaDex Library</h1>
-    <p id="activity" class="activity" aria-live="polite"></p>
-    <span id="count" class="count" aria-live="polite">0 selected</span>
-    <button class="btn primary" id="go" disabled>Queue 0</button>
+<a class="skip" href="#grid">Skip to titles</a>
+
+<header class="bar">
+  <h1></h1>
+  <div class="views" role="group" aria-label="Layout">
+    <button id="vPosters" type="button" aria-pressed="true" aria-label="Posters" title="Posters"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg></button>
+    <button id="vRows" type="button" aria-pressed="false" aria-label="Rows" title="Rows"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/></svg></button>
+    <button id="vList" type="button" aria-pressed="false" aria-label="List" title="List"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
   </div>
-
-  <div class="filters" role="search">
-    <div class="primary-filters">
-      <label class="field grow">
-        <span class="sr">Search titles</span>
-        <input id="q" type="search" placeholder="Search titles" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="sr">Sort by</span>
-        <select id="sortSel">
-          <option value="title">Title A&ndash;Z</option>
-          <option value="titleDesc">Title Z&ndash;A</option>
-          <option value="rating">Rating, high first</option>
-          <option value="follows">Follows, high first</option>
-          <option value="yearNew">Year, newest first</option>
-          <option value="yearOld">Year, oldest first</option>
-        </select>
-      </label>
-      <button class="btn toggle-filters" id="filtersBtn" type="button" aria-expanded="false" aria-controls="adv">
-        Filters<span id="filterCount" class="pill" hidden></span>
-      </button>
-    </div>
-
-    <div id="adv" class="advanced">
-      <label class="field">
-        <span class="lbl">Include tag</span>
-        <select id="tagSel"><option value="">Any</option></select>
-      </label>
-      <label class="field">
-        <span class="lbl">Exclude tag</span>
-        <select id="exSel"><option value="">None</option></select>
-      </label>
-      <label class="field">
-        <span class="lbl">Demographic</span>
-        <select id="demoSel"><option value="">Any</option></select>
-      </label>
-      <fieldset class="field years">
-        <legend class="lbl">Year</legend>
-        <input id="yFrom" type="number" min="1900" max="2100" placeholder="From" aria-label="Year from" inputmode="numeric">
-        <span aria-hidden="true">&ndash;</span>
-        <input id="yTo" type="number" min="1900" max="2100" placeholder="To" aria-label="Year to" inputmode="numeric">
-      </fieldset>
-    </div>
-
-    <div class="chips-row">
-      <span id="activeTags" class="active-tags"></span>
-      <button class="link" id="clearFilters" type="button" hidden>Clear filters</button>
-    </div>
-
-    <div class="tools">
-      <span id="shown" class="shown" aria-live="polite"></span>
-      <span class="tool-btns">
-        <button class="btn small" id="allY" type="button">Select shown</button>
-        <button class="btn small" id="allN" type="button">Deselect shown</button>
-        <button class="btn small" id="clearDone" type="button" title="Remove finished, failed and canceled entries from the queue">Clear finished</button>
-      </span>
-    </div>
-  </div>
+  <button id="queueBtn" class="iconbtn" type="button" aria-label="Queue" aria-haspopup="dialog" aria-expanded="false" aria-controls="queuePanel" title="Queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-4 5 5 5-5M5 20h14"/></svg><b id="queueCount" class="cnt" hidden></b></button>
+  <button id="settingsBtn" class="iconbtn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPanel" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h9M18 7h1M5 17h1M10 17h9"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button>
 </header>
 
-<div id="banner" role="alert" hidden></div>
-<p id="msg" role="status">Loading&hellip;</p>
-<main id="list" tabindex="-1"></main>
-<details id="logBox" class="logbox" hidden>
-  <summary>Activity log</summary>
-  <pre id="log"></pre>
-</details>
+<div class="searchrow">
+  <label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="q" type="search" placeholder="Search your library" aria-label="Search titles" autocomplete="off"></label>
+  <button id="toggleFilters" class="filterbtn" type="button" aria-expanded="false" aria-controls="filters"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span>Filters</span><b id="fcount" hidden></b></button>
+</div>
 
+<section id="filters" class="filters" hidden aria-label="Filters">
+  <label>Sort by<select id="fSort"></select></label>
+  <div class="field">Filter tags
+    <button id="tagBtn" class="select" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="tagPicker"><span id="tagLabel">Any</span></button>
+  </div>
+  <label>Content rating<select id="fRating"><option value="">Any</option></select></label>
+  <label>Magazine demographic<select id="fDemo"><option value="">Any</option></select></label>
+  <label>Publication status<select id="fStatus"><option value="">Any</option></select></label>
+  <label>Original language<select id="fLang"><option value="">Any</option></select></label>
+  <div class="field">Publication year
+    <div class="yrs"><input id="yFrom" type="number" min="1900" max="2100" inputmode="numeric" placeholder="From" aria-label="From year"><input id="yTo" type="number" min="1900" max="2100" inputmode="numeric" placeholder="To" aria-label="To year"></div>
+  </div>
+  <div class="actions">
+    <button id="reset" class="danger" type="button">Reset filters</button>
+    <button id="lucky" class="soft" type="button">Surprise me</button>
+  </div>
+</section>
+
+<div id="tagPicker" class="picker" hidden role="dialog" aria-label="Filter tags"></div>
+
+<div id="banner" class="banner" role="alert" hidden></div>
+<p id="count" class="count" aria-live="polite">Loading…</p>
+<main><div id="grid" class="grid posters" aria-busy="true"></div></main>
+
+<div id="queuePanel" class="spanel qp" hidden role="dialog" aria-label="Download queue" tabindex="-1"></div>
+<div id="settingsPanel" class="spanel" hidden role="dialog" aria-label="Settings" tabindex="-1"></div>
+
+<div id="scrim" class="scrim" hidden></div>
+<div id="detail" class="dialog" hidden role="dialog" aria-modal="true" aria-label="Series details"></div>
+
+<div class="dock">
+  <div class="pill" data-hide="1" aria-live="polite">
+    <button id="qToggle" class="qstate" type="button" aria-expanded="false" aria-controls="queuePanel"></button>
+    <button id="qAdd" class="add" type="button" hidden></button>
+  </div>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>
