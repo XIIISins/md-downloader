@@ -33,6 +33,7 @@ func main() {
 		daemon     = flag.Bool("daemon", false, "run the downloader: works through a persistent queue that -library fills")
 		daemonAddr = flag.String("daemon-addr", "127.0.0.1:8485", "address the downloader daemon listens on (and -library connects to)")
 		stateDir   = flag.String("state-dir", library.DefaultStateDir(), "where the daemon keeps its queue")
+		staticDir  = flag.String("static", "", "serve the UI files from this directory instead of the embedded copy (for development)")
 		refresh    = flag.Bool("refresh", false, "ignore cached library data and re-fetch everything")
 		lang       = flag.String("lang", "en", "translated language code")
 		out        = flag.String("out", "downloads", "output directory")
@@ -83,7 +84,7 @@ func main() {
 			log.Fatalf("credentials: %v", err)
 		}
 		c.Auth = mangadex.NewSession(c.HTTP, creds)
-		if err := server.Run(ctx, c, *status, *addr, *cacheDir, *daemonAddr, *refresh, opts); err != nil {
+		if err := server.Run(ctx, c, *status, *addr, *cacheDir, *daemonAddr, *refresh, *staticDir, opts); err != nil {
 			log.Fatal(err)
 		}
 		return

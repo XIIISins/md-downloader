@@ -60,6 +60,7 @@ Run the downloader and the web UI, normally as two processes:
 ```sh
 ./md-downloader -daemon -out ~/Manga -workers 8   # terminal 1: processes the queue
 ./md-downloader -library                           # terminal 2: web UI at http://127.0.0.1:8484
+./md-downloader -library -static web   # develop the UI: files are read from disk, reload to see edits
 ```
 
 Keep the daemon in its own terminal or run it in the background. Do not suspend it with Ctrl-Z: it keeps
