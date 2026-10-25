@@ -16,7 +16,8 @@ func LocalOnly(listen string, next http.Handler) http.Handler {
 		"localhost:" + port: true,
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !ok[r.Host] {
+		// Health probes come from the kubelet with the pod IP as Host.
+		if !ok[r.Host] && r.URL.Path != "/healthz" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

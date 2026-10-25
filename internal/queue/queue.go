@@ -37,7 +37,10 @@ type Queue struct {
 	detail       string // latest progress line of the current job
 }
 
-const heartbeatEvery = 30 * time.Second
+const (
+	heartbeatEvery = 10 * time.Second // also how fast a cancel from the API takes effect
+	pollEvery      = 5 * time.Second
+)
 
 // New returns a Queue backed by st.
 func New(st store.Store) *Queue {
@@ -152,10 +155,8 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 			log.Printf("claiming a job: %v", err)
 		}
 		if j == nil {
-			wait := time.After(time.Hour)
-			if err != nil {
-				wait = time.After(10 * time.Second)
-			}
+			// Other processes sharing the store (the API) can enqueue without waking us, so poll.
+			wait := time.After(pollEvery)
 			select {
 			case <-q.wake:
 			case <-wait:
@@ -224,6 +225,7 @@ func RunDaemon(ctx context.Context, d *download.Downloader, addr string, st stor
 	}()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
 	mux.HandleFunc("GET /queue", func(w http.ResponseWriter, r *http.Request) {
 		jobs, logs, err := q.Snapshot(r.Context())
 		if err != nil {
