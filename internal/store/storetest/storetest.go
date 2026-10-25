@@ -3,6 +3,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/xiiisins/md-downloader/internal/store"
@@ -84,6 +85,16 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		jobs, _ := s.List(ctx)
 		if len(jobs) != 1 || jobs[0].ID != b.ID {
 			t.Fatalf("List = %+v", jobs)
+		}
+	})
+
+	t.Run("update of a canceled job reports it", func(t *testing.T) {
+		s := newStore(t)
+		s.Enqueue(ctx, []store.Item{a})
+		s.Claim(ctx)
+		s.Cancel(ctx, a.ID)
+		if err := s.Update(ctx, a.ID, "x"); !errors.Is(err, store.ErrNotRunning) {
+			t.Fatalf("Update = %v, want ErrNotRunning", err)
 		}
 	})
 

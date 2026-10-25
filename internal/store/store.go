@@ -5,8 +5,15 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/xiiisins/md-downloader/internal/mangadex"
 )
+
+// ErrNotRunning is returned by Update when the job is no longer running under
+// this store: it was canceled elsewhere, or its lease went to another claimer.
+var ErrNotRunning = errors.New("job is not running")
 
 // Job states. Queued and running are "active": a series in either state can't
 // be queued again.
@@ -60,8 +67,17 @@ type Store interface {
 	List(ctx context.Context) ([]Job, error)
 	// Claim marks the oldest queued job running and returns it, or nil if none.
 	Claim(ctx context.Context) (*Job, error)
-	// Update sets a running job's detail line.
+	// Update sets a running job's detail line and renews its lease. It returns
+	// ErrNotRunning if the job is no longer running under this store.
 	Update(ctx context.Context, id, detail string) error
 	// Finish records a job's final (or re-queued) state.
 	Finish(ctx context.Context, id, state, detail string) error
+}
+
+// Library persists the library listing the sync worker produces and the API serves.
+type Library interface {
+	// ReplaceLibrary makes items the whole listing, dropping titles not in it.
+	ReplaceLibrary(ctx context.Context, items []mangadex.Manga) error
+	// Library returns the listing and when it was last replaced (zero if never).
+	Library(ctx context.Context) (items []mangadex.Manga, synced time.Time, err error)
 }

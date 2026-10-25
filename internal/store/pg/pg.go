@@ -31,6 +31,11 @@ const Lease = 10 * time.Minute
 // (Patroni promotes a new leader within 10-30 s).
 const retryFor = 60 * time.Second
 
+var (
+	_ store.Store   = (*Store)(nil)
+	_ store.Library = (*Store)(nil)
+)
+
 // Store is a store.Store backed by Postgres.
 type Store struct {
 	pool  *pgxpool.Pool
@@ -109,7 +114,7 @@ func retry(ctx context.Context, fn func() error) error {
 	for {
 		err := fn()
 		var pgErr *pgconn.PgError
-		if err == nil || errors.As(err, &pgErr) || errors.Is(err, pgx.ErrNoRows) ||
+		if err == nil || errors.As(err, &pgErr) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, store.ErrNotRunning) ||
 			ctx.Err() != nil || time.Now().After(deadline) {
 			return err
 		}
@@ -224,10 +229,13 @@ func (s *Store) Claim(ctx context.Context) (job *store.Job, err error) {
 // Update sets the detail line and renews the lease.
 func (s *Store) Update(ctx context.Context, id, detail string) error {
 	return retry(ctx, func() error {
-		_, err := s.pool.Exec(ctx, `
+		tag, err := s.pool.Exec(ctx, `
 			UPDATE jobs SET detail = $2, updated = now(), lease_until = now() + $4::interval
 			 WHERE series_id = $1 AND state = 'running' AND lease_owner = $3`,
 			id, detail, s.owner, fmt.Sprintf("%d seconds", int(Lease.Seconds())))
+		if err == nil && tag.RowsAffected() == 0 {
+			return store.ErrNotRunning
+		}
 		return err
 	})
 }
@@ -237,7 +245,7 @@ func (s *Store) Finish(ctx context.Context, id, state, detail string) error {
 		_, err := s.pool.Exec(ctx, `
 			UPDATE jobs SET state = $2, detail = $3, updated = now(),
 			       lease_owner = NULL, lease_until = NULL
-			 WHERE series_id = $1`, id, state, detail)
+			 WHERE series_id = $1 AND (lease_owner = $4 OR lease_owner IS NULL)`, id, state, detail, s.owner)
 		return err
 	})
 }
