@@ -44,7 +44,7 @@ func Run(ctx context.Context, c *mangadex.Client, status, addr, cacheDir, daemon
 	if err != nil {
 		return fmt.Errorf("loading library: %w", err)
 	}
-	items, err := library.LoadItems(ctx, c, ids, opts.Lang, opts.Ratings, library.LoadCache(cacheDir), refresh)
+	items, err := library.LoadItems(ctx, c, ids, opts.Lang, opts.Ratings, library.LoadCacheDir(cacheDir), refresh)
 	if err != nil {
 		return err
 	}

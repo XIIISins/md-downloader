@@ -34,7 +34,10 @@ type Queue struct {
 	curID        string
 	cancelCur    context.CancelFunc
 	userCanceled bool
+	detail       string // latest progress line of the current job
 }
+
+const heartbeatEvery = 30 * time.Second
 
 // New returns a Queue backed by st.
 func New(st store.Store) *Queue {
@@ -79,12 +82,44 @@ func (q *Queue) Snapshot(ctx context.Context) ([]store.Job, []string, error) {
 }
 
 func (q *Queue) note(ctx context.Context, j *store.Job, line string) {
-	_ = q.st.Update(ctx, j.ID, line)
+	q.touch(ctx, j.ID, line)
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.detail = line
 	q.logs = append(q.logs, j.Name()+": "+line)
 	if len(q.logs) > 200 {
 		q.logs = q.logs[len(q.logs)-200:]
+	}
+}
+
+// touch records progress, which also renews the job's lease. If the store says
+// the job is no longer ours (canceled from the API, or the lease went to another
+// daemon) the running download is stopped.
+func (q *Queue) touch(ctx context.Context, id, detail string) {
+	if err := q.st.Update(ctx, id, detail); errors.Is(err, store.ErrNotRunning) {
+		q.mu.Lock()
+		if id == q.curID && q.cancelCur != nil {
+			q.userCanceled = true
+			q.cancelCur()
+		}
+		q.mu.Unlock()
+	}
+}
+
+// heartbeat renews the current job's lease while a long chapter downloads.
+func (q *Queue) heartbeat(ctx context.Context, id string) {
+	t := time.NewTicker(heartbeatEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			q.mu.Lock()
+			detail := q.detail
+			q.mu.Unlock()
+			q.touch(ctx, id, detail)
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -132,7 +167,9 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 		jctx, cancel := context.WithCancel(ctx)
 		q.mu.Lock()
 		q.curID, q.cancelCur, q.userCanceled = j.ID, cancel, false
+		q.detail = j.Detail
 		q.mu.Unlock()
+		go q.heartbeat(jctx, j.ID)
 
 		logf := func(format string, args ...any) {
 			line := fmt.Sprintf(format, args...)

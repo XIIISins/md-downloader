@@ -137,10 +137,11 @@ func (f *File) Claim(_ context.Context) (*Job, error) {
 func (f *File) Update(_ context.Context, id, detail string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, j := f.find(id); j != nil {
+	if _, j := f.find(id); j != nil && j.State == StateRunning {
 		j.Detail, j.Updated = detail, time.Now()
+		return nil
 	}
-	return nil
+	return ErrNotRunning
 }
 
 func (f *File) Finish(_ context.Context, id, state, detail string) error {

@@ -29,19 +29,47 @@ type cacheEntry struct {
 	Downloadable bool      `json:"downloadable"`
 }
 
-// Cache is the on-disk metadata cache (library.json).
+// Persister stores the cache's serialized form.
+type Persister interface {
+	// Read returns the stored bytes, or nil if nothing was stored yet.
+	Read() ([]byte, error)
+	Write([]byte) error
+}
+
+// FilePersister keeps the cache in a file.
+type FilePersister string
+
+// Read implements Persister; a missing file reads as empty.
+func (f FilePersister) Read() ([]byte, error) {
+	b, err := os.ReadFile(string(f))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return b, err
+}
+
+// Write implements Persister, replacing the file atomically.
+func (f FilePersister) Write(b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(string(f)), 0o755); err != nil {
+		return err
+	}
+	tmp := string(f) + ".part"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, string(f))
+}
+
+// Cache is the metadata cache.
 type Cache struct {
-	path    string
+	p       Persister
 	Entries map[string]*cacheEntry `json:"entries"`
 }
 
-// LoadCache reads the cache file; a missing or corrupt file is an empty cache.
-func LoadCache(dir string) *Cache {
-	mc := &Cache{
-		path:    filepath.Join(dir, "library.json"),
-		Entries: map[string]*cacheEntry{},
-	}
-	if b, err := os.ReadFile(mc.path); err == nil {
+// LoadCache reads the cache from p; missing or corrupt data is an empty cache.
+func LoadCache(p Persister) *Cache {
+	mc := &Cache{p: p, Entries: map[string]*cacheEntry{}}
+	if b, err := p.Read(); err == nil && b != nil {
 		_ = json.Unmarshal(b, mc)
 		if mc.Entries == nil {
 			mc.Entries = map[string]*cacheEntry{}
@@ -50,19 +78,17 @@ func LoadCache(dir string) *Cache {
 	return mc
 }
 
+// LoadCacheDir loads the cache file (library.json) in dir.
+func LoadCacheDir(dir string) *Cache {
+	return LoadCache(FilePersister(filepath.Join(dir, "library.json")))
+}
+
 func (mc *Cache) save() error {
-	if err := os.MkdirAll(filepath.Dir(mc.path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.Marshal(mc)
 	if err != nil {
 		return err
 	}
-	tmp := mc.path + ".part"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, mc.path)
+	return mc.p.Write(b)
 }
 
 // DefaultCacheDir is the per-user cache location, e.g. ~/Library/Caches/mangadex-scraper.

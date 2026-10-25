@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/xiiisins/md-downloader/internal/mangadex"
 	"github.com/xiiisins/md-downloader/internal/store"
 	"github.com/xiiisins/md-downloader/internal/store/pg"
 	"github.com/xiiisins/md-downloader/internal/store/storetest"
@@ -60,5 +61,42 @@ func TestTwoOwnersNeverShareAJob(t *testing.T) {
 	jb, _ := b.Claim(ctx)
 	if ja == nil || jb != nil {
 		t.Fatalf("a=%v b=%v; the single job must go to exactly one claimer", ja, jb)
+	}
+}
+
+func TestLibraryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, "lib")
+	in := []mangadex.Manga{
+		{ID: "b", Title: "beta", Tags: []string{"x"}, Year: 2020, Cover: "b.jpg"},
+		{ID: "a", Title: "Alpha", Rating: 8.5, Cover: "a.jpg"},
+	}
+	if err := s.ReplaceLibrary(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceLibrary(ctx, in[:1]); err != nil { // drops "a"
+		t.Fatal(err)
+	}
+	out, synced, err := s.Library(ctx)
+	if err != nil || len(out) != 1 || out[0].ID != "b" || out[0].Cover != "b.jpg" || out[0].Year != 2020 || synced.IsZero() {
+		t.Fatalf("Library = %+v, %v, %v", out, synced, err)
+	}
+}
+
+func TestBlob(t *testing.T) {
+	s := open(t, "blob")
+	b := s.Blob("test")
+	if err := b.Write([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Write([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.Read()
+	if err != nil || string(got) != "two" {
+		t.Fatalf("Read = %q, %v", got, err)
+	}
+	if got, _ := s.Blob("missing").Read(); got != nil {
+		t.Fatalf("missing blob read %q, want nil", got)
 	}
 }
