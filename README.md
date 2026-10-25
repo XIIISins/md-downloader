@@ -24,7 +24,7 @@ Please respect the creators and groups behind the series, and MangaDex's terms o
 Requires Go 1.22 or newer.
 
 ```sh
-go build -o md-downloader .
+go build -o md-downloader ./cmd/md-downloader
 ```
 
 ## Credentials
