@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +24,7 @@ import (
 	"github.com/xiiisins/md-downloader/internal/server"
 	"github.com/xiiisins/md-downloader/internal/store"
 	"github.com/xiiisins/md-downloader/internal/store/pg"
+	"github.com/xiiisins/md-downloader/internal/syncer"
 )
 
 func main() {
@@ -37,6 +39,10 @@ func main() {
 		daemonAddr  = flag.String("daemon-addr", "127.0.0.1:8485", "address the downloader daemon listens on (and -library connects to)")
 		stateDir    = flag.String("state-dir", library.DefaultStateDir(), "where the daemon keeps its queue")
 		databaseURL = flag.String("database-url", os.Getenv("DATABASE_URL"), "Postgres URL for the queue (default $DATABASE_URL); empty keeps the queue in a file under -state-dir")
+		apiMode     = flag.Bool("api", false, "serve the web API from the shared database (needs -database-url); run behind a reverse proxy")
+		syncMode    = flag.Bool("sync", false, "copy your MangaDex library into the shared database on a schedule (needs -database-url)")
+		syncEvery   = flag.Duration("sync-interval", time.Hour, "time between library syncs for -sync")
+		syncOnce    = flag.Bool("once", false, "with -sync: sync once and exit")
 		staticDir   = flag.String("static", "", "serve the UI files from this directory instead of the embedded copy (for development)")
 		refresh     = flag.Bool("refresh", false, "ignore cached library data and re-fetch everything")
 		lang        = flag.String("lang", "en", "translated language code")
@@ -51,8 +57,8 @@ func main() {
 	flag.Parse()
 
 	id := mangadex.UUIDRe.FindString(*target)
-	if id == "" && !*libraryUI && !*daemon {
-		fmt.Fprintln(os.Stderr, "usage: mangadex-scraper (-manga <url-or-uuid> | -library | -daemon) [flags]")
+	if id == "" && !*libraryUI && !*daemon && !*apiMode && !*syncMode {
+		fmt.Fprintln(os.Stderr, "usage: md-downloader (-manga <url-or-uuid> | -library | -daemon | -api | -sync) [flags]")
 		flag.PrintDefaults()
 		os.Exit(2)
 	}
@@ -78,11 +84,7 @@ func main() {
 		opts.From, opts.To = -1, -1 // chapter ranges only make sense for a single -manga run
 		var st store.Store
 		if *databaseURL != "" {
-			host, _ := os.Hostname()
-			ps, err := pg.Open(ctx, *databaseURL, fmt.Sprintf("%s/%d", host, os.Getpid()))
-			if err != nil {
-				log.Fatalf("database: %v", err)
-			}
+			ps := openDB(ctx, *databaseURL)
 			defer ps.Close()
 			st = ps
 			log.Print("Queue state in Postgres")
@@ -97,13 +99,68 @@ func main() {
 		return
 	}
 
+	if *apiMode {
+		if *databaseURL == "" {
+			log.Fatal("-api needs -database-url (or $DATABASE_URL)")
+		}
+		ps := openDB(ctx, *databaseURL)
+		defer ps.Close()
+		s := server.New(server.Config{
+			Client: c,
+			Items: func(ctx context.Context) ([]mangadex.Manga, error) {
+				items, _, err := ps.Library(ctx)
+				return items, err
+			},
+			Backend:   server.StoreBackend{Store: ps},
+			CoverDir:  filepath.Join(*cacheDir, "covers"),
+			StaticDir: *staticDir,
+		})
+		ln, err := net.Listen("tcp", *addr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("API listening on http://%s", ln.Addr())
+		if err := server.Serve(ctx, ln, s.Handler()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	if *syncMode {
+		if *databaseURL == "" {
+			log.Fatal("-sync needs -database-url (or $DATABASE_URL)")
+		}
+		creds, err := mangadex.LoadCredentials(*tokenFile)
+		if err != nil {
+			log.Fatalf("credentials: %v", err)
+		}
+		c.Auth = mangadex.NewSession(c.HTTP, creds)
+		ps := openDB(ctx, *databaseURL)
+		defer ps.Close()
+		err = syncer.Run(ctx, syncer.Config{
+			Client:   c,
+			Library:  ps,
+			Cache:    ps.Blob("library_cache"),
+			Status:   *status,
+			Lang:     opts.Lang,
+			Ratings:  opts.Ratings,
+			Interval: *syncEvery,
+			Once:     *syncOnce,
+			Refresh:  *refresh,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	if *libraryUI {
 		creds, err := mangadex.LoadCredentials(*tokenFile)
 		if err != nil {
 			log.Fatalf("credentials: %v", err)
 		}
 		c.Auth = mangadex.NewSession(c.HTTP, creds)
-		if err := server.Run(ctx, c, *status, *addr, *cacheDir, *daemonAddr, *refresh, *staticDir, opts); err != nil {
+		if err := server.RunLocal(ctx, c, *status, *addr, *cacheDir, *daemonAddr, *refresh, *staticDir, opts); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -116,6 +173,16 @@ func main() {
 	if t.Failed > 0 {
 		os.Exit(1)
 	}
+}
+
+// openDB connects to the shared database, identifying this process as a job owner.
+func openDB(ctx context.Context, url string) *pg.Store {
+	host, _ := os.Hostname()
+	ps, err := pg.Open(ctx, url, fmt.Sprintf("%s/%d", host, os.Getpid()))
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	return ps
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
