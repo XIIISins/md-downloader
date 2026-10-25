@@ -33,10 +33,18 @@ type Manga struct {
 	Status      string   `json:"status"`
 	Lang        string   `json:"lang"`
 	Demographic string   `json:"demographic"`
-	Year        int      `json:"year"`
-	Rating      float64  `json:"rating"`
-	Follows     int      `json:"follows"`
-	Cover       string   `json:"-"` // cover file name on uploads.mangadex.org
+	// ContentRating is safe, suggestive, erotica or pornographic.
+	ContentRating string `json:"content_rating"`
+	// TagGroups maps each of this title's Tags to its MangaDex group (format,
+	// genre, theme or content).
+	TagGroups map[string]string `json:"tag_groups"`
+	// Chapters counts downloadable chapters in the configured language. See
+	// DownloadableChapters for how exact it is.
+	Chapters int     `json:"chapters"`
+	Year     int     `json:"year"`
+	Rating   float64 `json:"rating"`
+	Follows  int     `json:"follows"`
+	Cover    string  `json:"-"` // cover file name on uploads.mangadex.org
 }
 
 // MangaTitle returns the English title of a series, or any title if it has none.
@@ -211,10 +219,12 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 					Status                 string            `json:"status"`
 					OriginalLanguage       string            `json:"originalLanguage"`
 					PublicationDemographic *string           `json:"publicationDemographic"`
+					ContentRating          string            `json:"contentRating"`
 					Year                   *int              `json:"year"`
 					Tags                   []struct {
 						Attributes struct {
-							Name map[string]string `json:"name"`
+							Name  map[string]string `json:"name"`
+							Group string            `json:"group"`
 						} `json:"attributes"`
 					} `json:"tags"`
 				} `json:"attributes"`
@@ -237,6 +247,9 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 				Description: cleanDescription(a.Description),
 				Status:      a.Status,
 				Lang:        a.OriginalLanguage,
+
+				ContentRating: a.ContentRating,
+				TagGroups:     map[string]string{},
 			}
 			if a.PublicationDemographic != nil {
 				it.Demographic = *a.PublicationDemographic
@@ -247,6 +260,7 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 			for _, t := range a.Tags {
 				if n := t.Attributes.Name["en"]; n != "" {
 					it.Tags = append(it.Tags, n)
+					it.TagGroups[n] = strings.ToLower(t.Attributes.Group)
 				}
 			}
 			for _, rel := range d.Relationships {
@@ -268,6 +282,17 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 // actually has pages on MangaDex (not an external link and not empty), for the
 // given content ratings.
 func (c *Client) HasDownloadable(ctx context.Context, id, lang string, ratings []string) (bool, error) {
+	n, err := c.DownloadableChapters(ctx, id, lang, ratings)
+	return n > 0, err
+}
+
+// DownloadableChapters returns how many chapters a title has in lang that are
+// hosted on MangaDex (no external link, not empty), for the given content
+// ratings. It reads the feed's total with limit=1, so it is a single request.
+// The total counts one entry per scanlation group, so a chapter uploaded by
+// several groups is counted several times and the result can run a bit above
+// the true number of chapters.
+func (c *Client) DownloadableChapters(ctx context.Context, id, lang string, ratings []string) (int, error) {
 	q := url.Values{}
 	q.Set("limit", "1")
 	q.Add("translatedLanguage[]", lang)
@@ -280,9 +305,9 @@ func (c *Client) HasDownloadable(ctx context.Context, id, lang string, ratings [
 		Total int `json:"total"`
 	}
 	if err := c.getJSON(ctx, c.APILimit, fmt.Sprintf("%s/manga/%s/feed?%s", c.BaseURL, id, q.Encode()), &r); err != nil {
-		return false, err
+		return 0, err
 	}
-	return r.Total > 0, nil
+	return r.Total, nil
 }
 
 // addStatistics fills in rating and follows. Best effort: failures are ignored.

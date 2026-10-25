@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -103,5 +104,41 @@ func TestBackendErrorsReachThePage(t *testing.T) {
 	rec = do(newTestServer(&fakeBackend{err: errors.New("pq: secret detail")}), "GET", "/api/queue", "")
 	if strings.Contains(rec.Body.String(), "secret detail") {
 		t.Errorf("internal error text leaked to the page: %s", rec.Body)
+	}
+}
+
+func TestLibraryJSONShape(t *testing.T) {
+	items := []mangadex.Manga{
+		{ID: "a", Title: "Alpha", Tags: []string{"Fantasy"}, ContentRating: "safe",
+			TagGroups: map[string]string{"Fantasy": "genre"}, Chapters: 7},
+		{ID: "legacy", Title: "Legacy"}, // synced before the new fields existed
+	}
+	h := New(Config{
+		Client:   mangadex.NewClient(http.DefaultClient),
+		Items:    func(context.Context) ([]mangadex.Manga, error) { return items, nil },
+		Backend:  &fakeBackend{},
+		CoverDir: filepath.Join(os.TempDir(), "md-test-covers"),
+	}).Handler()
+
+	rec := do(h, "GET", "/api/library", "")
+	var got []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 2 {
+		t.Fatalf("library = %d %s (%v)", rec.Code, rec.Body, err)
+	}
+	for _, it := range got {
+		for _, key := range []string{"id", "title", "tags", "demographic", "content_rating", "tag_groups", "chapters"} {
+			if _, ok := it[key]; !ok {
+				t.Errorf("item %v lacks %q", it["id"], key)
+			}
+		}
+		if _, ok := it["tag_groups"].(map[string]any); !ok {
+			t.Errorf("item %v: tag_groups = %#v, want an object", it["id"], it["tag_groups"])
+		}
+	}
+	if g := got[0]["tag_groups"].(map[string]any); g["Fantasy"] != "genre" || got[0]["chapters"] != float64(7) || got[0]["content_rating"] != "safe" {
+		t.Errorf("values not served: %v", got[0])
+	}
+	if items[1].TagGroups != nil {
+		t.Error("handler modified the shared items")
 	}
 }

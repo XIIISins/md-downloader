@@ -145,7 +145,15 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []mangadex.Manga{}
 	}
-	httpx.WriteJSON(w, items)
+	// Rows synced before tag_groups existed lack it; always send an object.
+	out := make([]mangadex.Manga, len(items)) // items may be shared with other requests
+	for i, it := range items {
+		if it.TagGroups == nil {
+			it.TagGroups = map[string]string{}
+		}
+		out[i] = it
+	}
+	httpx.WriteJSON(w, out)
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
