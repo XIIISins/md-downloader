@@ -1,4 +1,4 @@
-package main
+package mangadex
 
 import (
 	"context"
@@ -16,17 +16,18 @@ import (
 
 const tokenURL = "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token"
 
-type credentials struct {
+// Credentials are a personal API client plus the account it belongs to.
+type Credentials struct {
 	ClientID     string
 	ClientSecret string
 	Username     string
 	Password     string
 }
 
-// loadCredentials reads `key:value` lines (id, secret, username, password) from
+// LoadCredentials reads `key:value` lines (id, secret, username, password) from
 // path, then lets MD_* environment variables override them.
-func loadCredentials(path string) (credentials, error) {
-	var c credentials
+func LoadCredentials(path string) (Credentials, error) {
+	var c Credentials
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return c, err
@@ -67,10 +68,10 @@ func loadCredentials(path string) (credentials, error) {
 	return c, nil
 }
 
-// authSession keeps a MangaDex OAuth token fresh. Access tokens last ~15 minutes.
-type authSession struct {
+// Session keeps a MangaDex OAuth token fresh. Access tokens last ~15 minutes.
+type Session struct {
 	http  *http.Client
-	creds credentials
+	creds Credentials
 
 	mu      sync.Mutex
 	access  string
@@ -78,7 +79,12 @@ type authSession struct {
 	expires time.Time
 }
 
-func (a *authSession) token(ctx context.Context) (string, error) {
+// NewSession returns a Session that logs in lazily with creds.
+func NewSession(httpc *http.Client, creds Credentials) *Session {
+	return &Session{http: httpc, creds: creds}
+}
+
+func (a *Session) token(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.access != "" && time.Now().Before(a.expires.Add(-time.Minute)) {
@@ -103,18 +109,18 @@ func (a *authSession) token(ctx context.Context) (string, error) {
 }
 
 // invalidate forces the next token() call to refresh (e.g. after a 401).
-func (a *authSession) invalidate() {
+func (a *Session) invalidate() {
 	a.mu.Lock()
 	a.expires = time.Time{}
 	a.mu.Unlock()
 }
 
-func (a *authSession) request(ctx context.Context, form url.Values) error {
+func (a *Session) request(ctx context.Context, form url.Values) error {
 	form.Set("client_id", a.creds.ClientID)
 	form.Set("client_secret", a.creds.ClientSecret)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 	resp, err := a.http.Do(req)
 	if err != nil {
 		return err
@@ -136,24 +142,4 @@ func (a *authSession) request(ctx context.Context, form url.Values) error {
 	a.access, a.refresh = r.AccessToken, r.RefreshToken
 	a.expires = time.Now().Add(time.Duration(r.ExpiresIn) * time.Second)
 	return nil
-}
-
-// libraryStatuses returns manga IDs in the user's library with the given
-// reading status (reading, on_hold, plan_to_read, dropped, re_reading, completed).
-func (c *client) libraryStatuses(ctx context.Context, status string) ([]string, error) {
-	var r struct {
-		Statuses map[string]string `json:"statuses"`
-	}
-	u := apiBase + "/manga/status"
-	if status != "" && status != "all" {
-		u += "?status=" + url.QueryEscape(status)
-	}
-	if err := c.getJSONAuth(ctx, c.api, u, &r); err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(r.Statuses))
-	for id := range r.Statuses {
-		ids = append(ids, id)
-	}
-	return ids, nil
 }

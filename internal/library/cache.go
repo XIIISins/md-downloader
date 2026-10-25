@@ -1,10 +1,14 @@
-package main
+// Package library builds the list of downloadable titles from a MangaDex
+// library, caching metadata on disk so startup is fast.
+package library
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/xiiisins/md-downloader/internal/mangadex"
 )
 
 const (
@@ -14,25 +18,26 @@ const (
 
 // cacheEntry remembers everything we looked up for one library title.
 type cacheEntry struct {
-	Item    libItem   `json:"item"`
-	Cover   string    `json:"cover"` // libItem.cover is unexported, so keep it here
-	Lang    string    `json:"lang"`  // language the details were requested for
-	HasLang bool      `json:"hasLang"`
-	Fetched time.Time `json:"fetched"`
+	Item    mangadex.Manga `json:"item"`
+	Cover   string         `json:"cover"` // Manga.Cover is not serialized, so keep it here
+	Lang    string         `json:"lang"`  // language the details were requested for
+	HasLang bool           `json:"hasLang"`
+	Fetched time.Time      `json:"fetched"`
 
 	CheckKey     string    `json:"checkKey"` // language + ratings the check ran with
 	Checked      time.Time `json:"checked"`
 	Downloadable bool      `json:"downloadable"`
 }
 
-type metaCache struct {
+// Cache is the on-disk metadata cache (library.json).
+type Cache struct {
 	path    string
 	Entries map[string]*cacheEntry `json:"entries"`
 }
 
-// loadMetaCache reads the cache file; a missing or corrupt file is an empty cache.
-func loadMetaCache(dir string) *metaCache {
-	mc := &metaCache{
+// LoadCache reads the cache file; a missing or corrupt file is an empty cache.
+func LoadCache(dir string) *Cache {
+	mc := &Cache{
 		path:    filepath.Join(dir, "library.json"),
 		Entries: map[string]*cacheEntry{},
 	}
@@ -45,7 +50,7 @@ func loadMetaCache(dir string) *metaCache {
 	return mc
 }
 
-func (mc *metaCache) save() error {
+func (mc *Cache) save() error {
 	if err := os.MkdirAll(filepath.Dir(mc.path), 0o755); err != nil {
 		return err
 	}
@@ -60,16 +65,16 @@ func (mc *metaCache) save() error {
 	return os.Rename(tmp, mc.path)
 }
 
-// defaultCacheDir is the per-user cache location, e.g. ~/Library/Caches/mangadex-scraper.
-func defaultCacheDir() string {
+// DefaultCacheDir is the per-user cache location, e.g. ~/Library/Caches/mangadex-scraper.
+func DefaultCacheDir() string {
 	if d, err := os.UserCacheDir(); err == nil {
 		return filepath.Join(d, "mangadex-scraper")
 	}
 	return ".cache"
 }
 
-// defaultStateDir holds data that must survive cache cleanups, like the download queue.
-func defaultStateDir() string {
+// DefaultStateDir holds data that must survive cache cleanups, like the download queue.
+func DefaultStateDir() string {
 	if d, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(d, "mangadex-scraper")
 	}

@@ -1,4 +1,4 @@
-package main
+package download
 
 import (
 	"context"
@@ -10,13 +10,27 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/xiiisins/md-downloader/internal/mangadex"
+	"github.com/xiiisins/md-downloader/internal/retry"
 )
+
+// newTestDownloader points a Downloader at a fake API server with fast rate
+// limits and no reporting, so fake URLs are never sent to MangaDex.
+func newTestDownloader(apiURL string, workers int) *Downloader {
+	c := mangadex.NewClient(&http.Client{Timeout: 5 * time.Second})
+	c.BaseURL = apiURL
+	c.APILimit = mangadex.NewLimiter(time.Millisecond)
+	c.AtHomeLimit = mangadex.NewLimiter(time.Millisecond)
+	c.DisableReports()
+	return &Downloader{API: c, Workers: workers}
+}
 
 // TestDownloadChapterRetriesOnFreshServer simulates an image node that fails one
 // page for good, and checks the chapter completes after re-requesting a server.
 func TestDownloadChapterRetriesOnFreshServer(t *testing.T) {
-	backoffUnit = time.Millisecond
-	defer func() { backoffUnit = time.Second }()
+	retry.Unit = time.Millisecond
+	defer func() { retry.Unit = time.Second }()
 
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("image-bytes"))
@@ -41,20 +55,10 @@ func TestDownloadChapterRetriesOnFreshServer(t *testing.T) {
 	}))
 	defer api.Close()
 
-	old := apiBase
-	apiBase = api.URL
-	defer func() { apiBase = old }()
-
-	c := &client{
-		http:    &http.Client{Timeout: 5 * time.Second},
-		api:     &limiter{interval: time.Millisecond},
-		atHome:  &limiter{interval: time.Millisecond},
-		workers: 2,
-	}
-	c.reportOff.Store(time.Now().Add(time.Hour).UnixNano()) // never report fake URLs to MangaDex
+	d := newTestDownloader(api.URL, 2)
 
 	dir := t.TempDir()
-	n, err := c.downloadChapter(context.Background(), chapter{ID: "c1"}, dir)
+	n, err := d.downloadChapter(context.Background(), mangadex.Chapter{ID: "c1"}, dir)
 	if err != nil || n != 3 {
 		t.Fatalf("downloadChapter = %d, %v; want 3, nil", n, err)
 	}
@@ -69,8 +73,8 @@ func TestDownloadChapterRetriesOnFreshServer(t *testing.T) {
 }
 
 func TestDownloadChapterGivesUpAfterAllRounds(t *testing.T) {
-	backoffUnit = time.Millisecond
-	defer func() { backoffUnit = time.Second }()
+	retry.Unit = time.Millisecond
+	defer func() { retry.Unit = time.Second }()
 
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "down", http.StatusServiceUnavailable)
@@ -82,19 +86,9 @@ func TestDownloadChapterGivesUpAfterAllRounds(t *testing.T) {
 		fmt.Fprintf(w, `{"baseUrl":%q,"chapter":{"hash":"h","data":["1.jpg"],"dataSaver":[]}}`, dead.URL)
 	}))
 	defer api.Close()
-	old := apiBase
-	apiBase = api.URL
-	defer func() { apiBase = old }()
+	d := newTestDownloader(api.URL, 1)
 
-	c := &client{
-		http:    &http.Client{Timeout: 5 * time.Second},
-		api:     &limiter{interval: time.Millisecond},
-		atHome:  &limiter{interval: time.Millisecond},
-		workers: 1,
-	}
-	c.reportOff.Store(time.Now().Add(time.Hour).UnixNano())
-
-	n, err := c.downloadChapter(context.Background(), chapter{ID: "c1"}, t.TempDir())
+	n, err := d.downloadChapter(context.Background(), mangadex.Chapter{ID: "c1"}, t.TempDir())
 	if err == nil || n != 0 {
 		t.Fatalf("downloadChapter = %d, %v; want 0 and an error", n, err)
 	}
@@ -104,11 +98,11 @@ func TestDownloadChapterGivesUpAfterAllRounds(t *testing.T) {
 }
 
 func TestTallyString(t *testing.T) {
-	got := tally{ok: 4, have: 76, external: 1}.String()
+	got := Tally{OK: 4, Have: 76, External: 1}.String()
 	if want := "4 downloaded, 76 already had, 1 external/unavailable"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	got = tally{ok: 1, failed: 2}.String()
+	got = Tally{OK: 1, Failed: 2}.String()
 	if want := "1 downloaded, 0 already had, 0 external/unavailable, 2 failed"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
