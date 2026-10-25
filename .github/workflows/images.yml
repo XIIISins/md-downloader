@@ -1,0 +1,79 @@
+# Builds and publishes the container images to GHCR on every push to main that
+# touches code or image inputs. Tags: sha-<short> and latest.
+#
+#   ghcr.io/xiiisins/md-downloader       Go binary (Dockerfile)
+#   ghcr.io/xiiisins/md-downloader-web   Caddy + static UI (web/Dockerfile)
+#
+# Only GITHUB_TOKEN is used. Actions are pinned by commit SHA.
+
+name: images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+      - web/**
+      - Dockerfile
+      - Caddyfile
+      - .dockerignore
+      - .github/workflows/images.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  push:
+    name: push (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: md-downloader
+            dockerfile: Dockerfile
+          - image: md-downloader-web
+            dockerfile: web/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute tags
+        id: tags
+        env:
+          IMAGE: ghcr.io/xiiisins/${{ matrix.image }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "${IMAGE}:sha-${GITHUB_SHA::7}"
+            echo "${IMAGE}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

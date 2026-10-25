@@ -1,0 +1,9 @@
+# Allowlist: only what the builds need goes into the context, so credentials
+# and local state can never be copied into an image.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!web/
+!Caddyfile
