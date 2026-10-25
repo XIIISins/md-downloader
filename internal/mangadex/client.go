@@ -27,7 +27,7 @@ const (
 	// DefaultBaseURL is the MangaDex API root.
 	DefaultBaseURL = "https://api.mangadex.org"
 	// UserAgent identifies this tool to MangaDex.
-	UserAgent = "mangadex-scraper/1.0 (personal offline reader)"
+	UserAgent = "md-downloader/1.0 (personal offline reader)"
 
 	maxRetries = 4
 )

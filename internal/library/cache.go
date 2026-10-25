@@ -91,10 +91,15 @@ func (mc *Cache) save() error {
 	return mc.p.Write(b)
 }
 
-// DefaultCacheDir is the per-user cache location, e.g. ~/Library/Caches/mangadex-scraper.
+const (
+	appDir    = "md-downloader"
+	legacyDir = "mangadex-scraper" // the tool's name before the rename
+)
+
+// DefaultCacheDir is the per-user cache location, e.g. ~/Library/Caches/md-downloader.
 func DefaultCacheDir() string {
 	if d, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(d, "mangadex-scraper")
+		return migrated(d)
 	}
 	return ".cache"
 }
@@ -102,7 +107,19 @@ func DefaultCacheDir() string {
 // DefaultStateDir holds data that must survive cache cleanups, like the download queue.
 func DefaultStateDir() string {
 	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "mangadex-scraper")
+		return migrated(d)
 	}
 	return ".state"
+}
+
+// migrated returns base/md-downloader, first moving a directory left by the old
+// name into its place so an existing queue and cache carry over.
+func migrated(base string) string {
+	dir, old := filepath.Join(base, appDir), filepath.Join(base, legacyDir)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if _, err := os.Stat(old); err == nil {
+			_ = os.Rename(old, dir)
+		}
+	}
+	return dir
 }
