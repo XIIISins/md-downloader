@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -37,7 +38,7 @@ type Server struct {
 	coverSem chan struct{}
 }
 
-func Run(ctx context.Context, c *mangadex.Client, status, addr, cacheDir, daemonAddr string, refresh bool, opts download.Options) error {
+func Run(ctx context.Context, c *mangadex.Client, status, addr, cacheDir, daemonAddr string, refresh bool, staticDir string, opts download.Options) error {
 	log.Printf("Logging in and loading library (%s)...", status)
 	ids, err := c.LibraryStatuses(ctx, status)
 	if err != nil {
@@ -72,10 +73,15 @@ func Run(ctx context.Context, c *mangadex.Client, status, addr, cacheDir, daemon
 		return err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(web.IndexHTML)
-	})
+	// With -static the files are read from disk on every request, so UI edits
+	// show up on reload without rebuilding.
+	files := web.FS()
+	if staticDir != "" {
+		files = os.DirFS(staticDir)
+		log.Printf("Serving UI files from %s", staticDir)
+	}
+	mux.Handle("GET /{$}", indexHandler(files))
+	mux.Handle("GET /static/", http.FileServerFS(files))
 	mux.HandleFunc("GET /api/library", s.handleLibrary)
 	mux.HandleFunc("GET /cover/{id}", s.handleCover)
 	mux.HandleFunc("POST /api/download", s.handleDownload)
@@ -289,4 +295,17 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 	// The file name changes when the cover does, so this URL can be cached hard.
 	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
 	w.Write(b)
+}
+
+// indexHandler serves index.html from files.
+func indexHandler(files fs.FS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := fs.ReadFile(files, "index.html")
+		if err != nil {
+			http.Error(w, "UI files missing", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(b)
+	})
 }
