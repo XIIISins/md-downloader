@@ -206,13 +206,13 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 			Data []struct {
 				ID         string `json:"id"`
 				Attributes struct {
-					Title             map[string]string `json:"title"`
-					Description       map[string]string `json:"description"`
-					Status            string            `json:"status"`
-					OriginalLanguage  string            `json:"originalLanguage"`
-					PublicDemographic *string           `json:"publicDemographic"`
-					Year              *int              `json:"year"`
-					Tags              []struct {
+					Title                  map[string]string `json:"title"`
+					Description            map[string]string `json:"description"`
+					Status                 string            `json:"status"`
+					OriginalLanguage       string            `json:"originalLanguage"`
+					PublicationDemographic *string           `json:"publicationDemographic"`
+					Year                   *int              `json:"year"`
+					Tags                   []struct {
 						Attributes struct {
 							Name map[string]string `json:"name"`
 						} `json:"attributes"`
@@ -238,8 +238,8 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 				Status:      a.Status,
 				Lang:        a.OriginalLanguage,
 			}
-			if a.PublicDemographic != nil {
-				it.Demographic = *a.PublicDemographic
+			if a.PublicationDemographic != nil {
+				it.Demographic = *a.PublicationDemographic
 			}
 			if a.Year != nil {
 				it.Year = *a.Year
