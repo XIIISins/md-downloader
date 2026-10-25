@@ -1,3 +1,5 @@
+// Package queue runs the download worker over a persistent store and exposes
+// the daemon's local control API.
 package queue
 
 import (
@@ -8,8 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,182 +17,72 @@ import (
 	"github.com/xiiisins/md-downloader/internal/download"
 	"github.com/xiiisins/md-downloader/internal/httpx"
 	"github.com/xiiisins/md-downloader/internal/mangadex"
+	"github.com/xiiisins/md-downloader/internal/store"
 )
 
-// Job states. queued and running are "active": a series in either state can't
-// be queued again.
-const (
-	stateQueued   = "queued"
-	stateRunning  = "running"
-	stateDone     = "done"
-	stateFailed   = "failed"
-	stateCanceled = "canceled"
-)
+// Item is a series to enqueue.
+type Item = store.Item
 
-type Job struct {
-	ID      string    `json:"id"`
-	Title   string    `json:"title"`
-	State   string    `json:"state"`
-	Detail  string    `json:"detail"`
-	Added   time.Time `json:"added"`
-	Updated time.Time `json:"updated"`
-}
-
-func (j *Job) active() bool { return j.State == stateQueued || j.State == stateRunning }
-
-func (j *Job) name() string {
-	if j.Title != "" {
-		return j.Title
-	}
-	return j.ID
-}
-
-type Item struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}
-
-// queue is a persistent, ordered list of series to download. The daemon is its
-// only writer, so a plain JSON file is enough.
+// Queue pairs a Store with the in-memory state of the job being worked on
+// (so it can be canceled) and a ring of recent log lines.
 type Queue struct {
-	mu   sync.Mutex
-	path string
-	jobs []*Job
-	logs []string
+	st   store.Store
 	wake chan struct{}
 
+	mu           sync.Mutex
+	logs         []string
 	curID        string
 	cancelCur    context.CancelFunc
 	userCanceled bool
 }
 
-func Load(path string) *Queue {
-	q := &Queue{path: path, wake: make(chan struct{}, 1)}
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &q.jobs)
-	}
-	// A job still marked running was interrupted by a shutdown or crash.
-	// Downloads skip finished files, so re-queueing it simply resumes it.
-	for _, j := range q.jobs {
-		if j.State == stateRunning {
-			j.State, j.Detail = stateQueued, "resuming after restart"
-		}
-	}
-	return q
+// New returns a Queue backed by st.
+func New(st store.Store) *Queue {
+	return &Queue{st: st, wake: make(chan struct{}, 1)}
 }
 
-func (q *Queue) saveLocked() {
-	if err := os.MkdirAll(filepath.Dir(q.path), 0o755); err != nil {
-		log.Printf("warning: saving queue: %v", err)
-		return
-	}
-	b, err := json.MarshalIndent(q.jobs, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp := q.path + ".part"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		log.Printf("warning: saving queue: %v", err)
-		return
-	}
-	_ = os.Rename(tmp, q.path)
-}
-
-func (q *Queue) find(id string) (int, *Job) {
-	for i, j := range q.jobs {
-		if j.ID == id {
-			return i, j
-		}
-	}
-	return -1, nil
-}
-
-// enqueue adds series to the end of the queue. Series that are already queued
-// or running are skipped and returned.
-func (q *Queue) enqueue(items []Item) (added int, skipped []string) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	now := time.Now()
-	for _, it := range items {
-		i, existing := q.find(it.ID)
-		if existing != nil {
-			if existing.active() {
-				skipped = append(skipped, it.ID)
-				continue
-			}
-			// Finished before: drop the old record so it re-enters at the back.
-			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
-		}
-		q.jobs = append(q.jobs, &Job{ID: it.ID, Title: it.Title, State: stateQueued, Added: now, Updated: now})
-		added++
-	}
-	q.saveLocked()
+// Enqueue adds series; ones already queued or running are returned as skipped.
+func (q *Queue) Enqueue(ctx context.Context, items []Item) (added int, skipped []string, err error) {
+	added, skipped, err = q.st.Enqueue(ctx, items)
 	select {
 	case q.wake <- struct{}{}:
 	default:
 	}
-	return added, skipped
+	return added, skipped, err
 }
 
-// cancel stops a queued or running series.
-func (q *Queue) cancel(id string) bool {
+// Cancel stops a queued or running series.
+func (q *Queue) Cancel(ctx context.Context, id string) (bool, error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	_, j := q.find(id)
-	if j == nil || !j.active() {
-		return false
-	}
-	if j.State == stateRunning && q.curID == id {
+	if id == q.curID && q.cancelCur != nil {
 		q.userCanceled = true
 		q.cancelCur()
-		return true // work() records the final state
+		q.mu.Unlock()
+		return true, nil // Work records the final state
 	}
-	j.State, j.Detail, j.Updated = stateCanceled, "canceled", time.Now()
-	q.saveLocked()
-	return true
+	q.mu.Unlock()
+	return q.st.Cancel(ctx, id)
 }
 
-func (q *Queue) clearFinished() {
+// ClearFinished drops finished jobs from the list.
+func (q *Queue) ClearFinished(ctx context.Context) error { return q.st.ClearFinished(ctx) }
+
+// Snapshot returns all jobs and the recent log lines.
+func (q *Queue) Snapshot(ctx context.Context) ([]store.Job, []string, error) {
+	jobs, err := q.st.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	kept := q.jobs[:0]
-	for _, j := range q.jobs {
-		if j.active() {
-			kept = append(kept, j)
-		}
-	}
-	q.jobs = kept
-	q.saveLocked()
+	return jobs, append([]string(nil), q.logs...), nil
 }
 
-func (q *Queue) snapshot() (jobs []Job, logs []string) {
+func (q *Queue) note(ctx context.Context, j *store.Job, line string) {
+	_ = q.st.Update(ctx, j.ID, line)
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, j := range q.jobs {
-		jobs = append(jobs, *j)
-	}
-	return jobs, append([]string(nil), q.logs...)
-}
-
-// claim marks the first queued job as running.
-func (q *Queue) claim() *Job {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, j := range q.jobs {
-		if j.State == stateQueued {
-			j.State, j.Detail, j.Updated = stateRunning, "starting", time.Now()
-			q.saveLocked()
-			return j
-		}
-	}
-	return nil
-}
-
-func (q *Queue) note(j *Job, line string) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	j.Detail, j.Updated = line, time.Now()
-	q.logs = append(q.logs, j.name()+": "+line)
+	q.logs = append(q.logs, j.Name()+": "+line)
 	if len(q.logs) > 200 {
 		q.logs = q.logs[len(q.logs)-200:]
 	}
@@ -200,6 +90,8 @@ func (q *Queue) note(j *Job, line string) {
 
 // Work runs queued series one at a time until ctx is canceled.
 func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Options) {
+	// Bookkeeping must still be written while shutting down, so it can't use ctx.
+	bg := context.Background()
 	waiting := false
 	for ctx.Err() == nil {
 		// Don't start (and fail) jobs while the output directory is missing,
@@ -220,10 +112,18 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 			waiting = false
 		}
 
-		j := q.claim()
+		j, err := q.st.Claim(bg)
+		if err != nil {
+			log.Printf("claiming a job: %v", err)
+		}
 		if j == nil {
+			wait := time.After(time.Hour)
+			if err != nil {
+				wait = time.After(10 * time.Second)
+			}
 			select {
 			case <-q.wake:
+			case <-wait:
 			case <-ctx.Done():
 			}
 			continue
@@ -236,8 +136,8 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 
 		logf := func(format string, args ...any) {
 			line := fmt.Sprintf(format, args...)
-			log.Printf("%s: %s", j.name(), line)
-			q.note(j, line)
+			log.Printf("%s: %s", j.Name(), line)
+			q.note(bg, j, line)
 		}
 		t, err := d.SyncManga(jctx, j.ID, o, logf)
 		cancel()
@@ -245,36 +145,40 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 		q.mu.Lock()
 		canceled := q.userCanceled
 		q.curID, q.cancelCur, q.userCanceled = "", nil, false
+		q.mu.Unlock()
+
+		var state, detail string
 		switch {
 		case ctx.Err() != nil && !canceled:
-			j.State, j.Detail = stateQueued, "interrupted; will resume"
+			state, detail = store.StateQueued, "interrupted; will resume"
 		case canceled:
-			j.State, j.Detail = stateCanceled, "canceled"
+			state, detail = store.StateCanceled, "canceled"
 		case errors.Is(err, download.ErrOutputUnavailable):
-			j.State, j.Detail = stateQueued, "waiting for output directory"
+			state, detail = store.StateQueued, "waiting for output directory"
 		case err != nil:
-			j.State, j.Detail = stateFailed, err.Error()
+			state, detail = store.StateFailed, err.Error()
 		case t.Failed > 0:
-			j.State, j.Detail = stateFailed, t.String()
+			state, detail = store.StateFailed, t.String()
 		default:
-			j.State, j.Detail = stateDone, t.String()
+			state, detail = store.StateDone, t.String()
 		}
-		j.Updated = time.Now()
-		q.saveLocked()
-		q.mu.Unlock()
+		if err := q.st.Finish(bg, j.ID, state, detail); err != nil {
+			log.Printf("recording result for %s: %v", j.Name(), err)
+		}
 	}
 }
 
 // RunDaemon runs the download worker and its local control API.
-func RunDaemon(ctx context.Context, d *download.Downloader, addr, stateDir string, o download.Options) error {
-	q := Load(filepath.Join(stateDir, "queue.json"))
+func RunDaemon(ctx context.Context, d *download.Downloader, addr string, st store.Store, o download.Options) error {
+	q := New(st)
+	jobs, _ := st.List(ctx)
 	active := 0
-	for _, j := range q.jobs {
-		if j.active() {
+	for _, j := range jobs {
+		if j.Active() {
 			active++
 		}
 	}
-	log.Printf("Queue: %d job(s), %d waiting (state in %s)", len(q.jobs), active, q.path)
+	log.Printf("Queue: %d job(s), %d waiting", len(jobs), active)
 
 	workerDone := make(chan struct{})
 	go func() {
@@ -284,7 +188,11 @@ func RunDaemon(ctx context.Context, d *download.Downloader, addr, stateDir strin
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /queue", func(w http.ResponseWriter, r *http.Request) {
-		jobs, logs := q.snapshot()
+		jobs, logs, err := q.Snapshot(r.Context())
+		if err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
 		httpx.WriteJSON(w, map[string]any{"jobs": jobs, "log": logs})
 	})
 	mux.HandleFunc("POST /queue", func(w http.ResponseWriter, r *http.Request) {
@@ -305,19 +213,31 @@ func RunDaemon(ctx context.Context, d *download.Downloader, addr, stateDir strin
 				return
 			}
 		}
-		added, skipped := q.enqueue(req.Items)
+		added, skipped, err := q.Enqueue(r.Context(), req.Items)
+		if err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
 		log.Printf("Enqueued %d series (%d already queued)", added, len(skipped))
 		httpx.WriteJSON(w, map[string]any{"added": added, "skipped": skipped})
 	})
 	mux.HandleFunc("POST /queue/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
-		if !q.cancel(r.PathValue("id")) {
+		ok, err := q.Cancel(r.Context(), r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
 			http.Error(w, "not queued or running", http.StatusNotFound)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /queue/clear", func(w http.ResponseWriter, r *http.Request) {
-		q.clearFinished()
+		if err := q.ClearFinished(r.Context()); err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 
