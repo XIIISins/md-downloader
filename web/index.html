@@ -3,43 +3,86 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>MangaDex Library</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header>
-  <h1>MangaDex Library <span id="count" style="color:var(--muted)"></span></h1>
-  <button class="btn" id="allY">All Y</button>
-  <button class="btn" id="allN">All N</button>
-  <button class="btn" id="clearDone" title="Remove finished, failed and canceled entries from the queue">Clear finished</button>
-  <button class="btn primary" id="go" disabled>Queue</button>
-  <div class="filters">
-    <input id="q" type="search" placeholder="Search title...">
-    <select id="tagSel"><option value="">Include tag...</option></select>
-    <select id="exSel"><option value="">Exclude tag...</option></select>
-    <select id="demoSel"><option value="">Any demographic</option></select>
-    <span class="yr">Year
-      <input id="yFrom" type="number" min="1900" max="2100" placeholder="from">
-      &ndash;
-      <input id="yTo" type="number" min="1900" max="2100" placeholder="to">
-    </span>
-    <select id="sortSel" title="Sort by">
-      <option value="title">Sort: Title A&ndash;Z</option>
-      <option value="titleDesc">Sort: Title Z&ndash;A</option>
-      <option value="rating">Sort: Rating (high first)</option>
-      <option value="follows">Sort: Follows (high first)</option>
-      <option value="yearNew">Sort: Year (newest first)</option>
-      <option value="yearOld">Sort: Year (oldest first)</option>
-    </select>
-    <span id="activeTags"></span>
-    <button class="btn" id="clearTags" hidden>Clear tags</button>
-    <span id="shown" style="color:var(--muted)"></span>
+<a class="skip" href="#list">Skip to series list</a>
+<header class="top">
+  <div class="bar">
+    <h1>MangaDex Library</h1>
+    <p id="activity" class="activity" aria-live="polite"></p>
+    <span id="count" class="count" aria-live="polite">0 selected</span>
+    <button class="btn primary" id="go" disabled>Queue 0</button>
+  </div>
+
+  <div class="filters" role="search">
+    <div class="primary-filters">
+      <label class="field grow">
+        <span class="sr">Search titles</span>
+        <input id="q" type="search" placeholder="Search titles" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="sr">Sort by</span>
+        <select id="sortSel">
+          <option value="title">Title A&ndash;Z</option>
+          <option value="titleDesc">Title Z&ndash;A</option>
+          <option value="rating">Rating, high first</option>
+          <option value="follows">Follows, high first</option>
+          <option value="yearNew">Year, newest first</option>
+          <option value="yearOld">Year, oldest first</option>
+        </select>
+      </label>
+      <button class="btn toggle-filters" id="filtersBtn" type="button" aria-expanded="false" aria-controls="adv">
+        Filters<span id="filterCount" class="pill" hidden></span>
+      </button>
+    </div>
+
+    <div id="adv" class="advanced">
+      <label class="field">
+        <span class="lbl">Include tag</span>
+        <select id="tagSel"><option value="">Any</option></select>
+      </label>
+      <label class="field">
+        <span class="lbl">Exclude tag</span>
+        <select id="exSel"><option value="">None</option></select>
+      </label>
+      <label class="field">
+        <span class="lbl">Demographic</span>
+        <select id="demoSel"><option value="">Any</option></select>
+      </label>
+      <fieldset class="field years">
+        <legend class="lbl">Year</legend>
+        <input id="yFrom" type="number" min="1900" max="2100" placeholder="From" aria-label="Year from" inputmode="numeric">
+        <span aria-hidden="true">&ndash;</span>
+        <input id="yTo" type="number" min="1900" max="2100" placeholder="To" aria-label="Year to" inputmode="numeric">
+      </fieldset>
+    </div>
+
+    <div class="chips-row">
+      <span id="activeTags" class="active-tags"></span>
+      <button class="link" id="clearFilters" type="button" hidden>Clear filters</button>
+    </div>
+
+    <div class="tools">
+      <span id="shown" class="shown" aria-live="polite"></span>
+      <span class="tool-btns">
+        <button class="btn small" id="allY" type="button">Select shown</button>
+        <button class="btn small" id="allN" type="button">Deselect shown</button>
+        <button class="btn small" id="clearDone" type="button" title="Remove finished, failed and canceled entries from the queue">Clear finished</button>
+      </span>
+    </div>
   </div>
 </header>
-<div id="banner" hidden></div>
-<div id="msg">Loading...</div>
-<div id="list"></div>
-<pre id="log"></pre>
+
+<div id="banner" role="alert" hidden></div>
+<p id="msg" role="status">Loading&hellip;</p>
+<main id="list" tabindex="-1"></main>
+<details id="logBox" class="logbox" hidden>
+  <summary>Activity log</summary>
+  <pre id="log"></pre>
+</details>
 
 <script src="/static/app.js"></script>
 </body>
