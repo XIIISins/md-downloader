@@ -1,0 +1,44 @@
+# Secrets: never commit credentials. Use environment variables or the
+# personal-api-token.example template (copy it to personal-api-token).
+personal-api-token
+personal-api-token.*
+!personal-api-token.example
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*.json
+*.secret
+*.secrets
+
+# Build output
+/mangadex-scraper
+/md-downloader
+/dist/
+*.test
+*.out
+
+# Downloaded content and runtime state
+/downloads/
+*.cbz
+*.part
+.cache/
+.state/
+queue.json
+library.json
+covers/
+
+# Local-only notes (contain internal hostnames/IPs from the homelab)
+/docs/homelab-handover.md
+/docs/internal/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,37 @@
+#!/bin/sh
+# Pre-commit guard against committing credentials. Enable with:
+#   git config core.hooksPath .githooks
+set -u
+
+fail() {
+	echo "pre-commit: $1" >&2
+	echo "pre-commit: commit blocked. Remove the secret from the staged changes (git reset <file>)." >&2
+	exit 1
+}
+
+# 1. Credential-looking files must never be staged, even with `git add -f`.
+bad=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)(personal-api-token|\.env(\..*)?|credentials.*\.json|.*\.(pem|key|p12|pfx))$' | grep -vE '\.example$')
+[ -z "$bad" ] || fail "credential file staged: $bad"
+
+# 2. No value from the local token file may appear in staged changes.
+#    Values are compared locally and never printed.
+if [ -f personal-api-token ]; then
+	added=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++')
+	while IFS= read -r line; do
+		value=${line#*:}
+		value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+		[ ${#value} -ge 6 ] || continue
+		if printf '%s\n' "$added" | grep -qF -- "$value"; then
+			fail "staged changes contain a value from personal-api-token (key: ${line%%:*})"
+		fi
+	done <personal-api-token
+fi
+
+# 3. Pattern-based scan when gitleaks is installed.
+if command -v gitleaks >/dev/null 2>&1; then
+	gitleaks protect --staged --redact --no-banner >/dev/null 2>&1 || {
+		gitleaks protect --staged --redact --no-banner >&2
+		fail "gitleaks found a possible secret"
+	}
+fi
+exit 0
