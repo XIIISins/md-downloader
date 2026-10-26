@@ -3,14 +3,14 @@
 @font-face { font-family: "Figtree"; src: url("/static/fonts/figtree-latin.woff2") format("woff2"); font-weight: 400 600; font-style: normal; font-display: swap; }
 :root { --hue: 285; --poster: 150px;
   --bg: #f4f4f6; --surface: #ffffff; --raise: #ebebef; --text: #14141a; --text-2: #55565f; --text-3: #8b8c96;
-  --accent: oklch(.58 .2 var(--hue)); --accent-ink: #ffffff; --run: #19a266; --wait: #c98a12; --bad: #d64545;
+  --accent: oklch(.58 .2 var(--hue)); --accent-ink: #ffffff; --st-ok: #178a55; --st-partial: #d9730d; --st-busy: #2f6fe0; --run: #19a266; --wait: #c98a12; --bad: #d64545;
   --glass: rgba(255,255,255,.72); --shadow: 0 10px 30px rgba(20,20,30,.16);
   --display: "Bricolage Grotesque", ui-rounded, system-ui, -apple-system, "Segoe UI", sans-serif; --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif; --pad: 20px; }
 :root[data-theme=dark] { --bg: #16171d; --surface: #1e1f27; --raise: #292a35; --text: #eeeef3; --text-2: #b3b4c0; --text-3: #81828f;
-  --accent: oklch(.74 .15 var(--hue)); --accent-ink: #0d0d11; --run: #4cd08c; --wait: #e5ae45; --bad: #ff7a7a;
+  --accent: oklch(.74 .15 var(--hue)); --accent-ink: #0d0d11; --st-ok: #4cd08c; --st-partial: #f0a03c; --st-busy: #6aa2ff; --run: #4cd08c; --wait: #e5ae45; --bad: #ff7a7a;
   --glass: rgba(30,30,40,.7); --shadow: 0 12px 34px rgba(0,0,0,.5); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { --bg: #16171d; --surface: #1e1f27; --raise: #292a35; --text: #eeeef3; --text-2: #b3b4c0; --text-3: #81828f;
-  --accent: oklch(.74 .15 var(--hue)); --accent-ink: #0d0d11; --run: #4cd08c; --wait: #e5ae45; --bad: #ff7a7a;
+  --accent: oklch(.74 .15 var(--hue)); --accent-ink: #0d0d11; --st-ok: #4cd08c; --st-partial: #f0a03c; --st-busy: #6aa2ff; --run: #4cd08c; --wait: #e5ae45; --bad: #ff7a7a;
   --glass: rgba(30,30,40,.7); --shadow: 0 12px 34px rgba(0,0,0,.5); } }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -48,8 +48,6 @@ main { padding: 0 var(--pad); }
 .plus svg { width: 18px; height: 18px; stroke-width: 2.2; }
 .p[data-sel="1"] .plus { background: var(--accent); color: var(--accent-ink); }
 .p[data-sel="1"] .art { box-shadow: 0 0 0 3px var(--accent); }
-.badge { position: absolute; left: 8px; top: 8px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--glass); backdrop-filter: blur(10px); display: flex; gap: 6px; align-items: center; }
-.badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--wait); } .badge[data-k=running] i { background: var(--run); animation: pulse 1.6s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 
 /* rows */
@@ -297,3 +295,15 @@ button:disabled { cursor: default; }
 .pill { max-width: 100%; }
 .qstate { flex: 0 1 auto; } .qstate span { min-width: 0; }
 .add { flex: none; }
+
+/* download status: a dot on posters, dot + label in rows and list; colours are fixed across colour schemes */
+.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); display: inline-block; }
+.dot[data-st=ok] { background: var(--st-ok); } .dot[data-st=partial] { background: var(--st-partial); } .dot[data-st=busy] { background: var(--st-busy); }
+.dot[data-run="1"] { animation: dotpulse 1.8s ease-in-out infinite; }
+@keyframes dotpulse { 50% { opacity: .45; } }
+.art > .dot { position: absolute; left: 8px; top: 8px; width: 12px; height: 12px; box-shadow: 0 0 0 2px var(--surface), 0 1px 4px rgba(0,0,0,.45); }
+.dl { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; font-weight: 500; min-width: 0; }
+.grid.rows .dl { margin-top: 2px; }
+.grid.list .dl { display: flex; font-size: 12px; color: var(--text-3); }
+.dialog p.dl { display: flex; margin: 10px 0 0; }
+@media (prefers-reduced-motion: reduce) { .dot[data-run="1"] { animation: none; } }
