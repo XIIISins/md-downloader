@@ -17,6 +17,7 @@ import (
 	"github.com/xiiisins/md-downloader/internal/download"
 	"github.com/xiiisins/md-downloader/internal/httpx"
 	"github.com/xiiisins/md-downloader/internal/mangadex"
+	"github.com/xiiisins/md-downloader/internal/progress"
 	"github.com/xiiisins/md-downloader/internal/store"
 )
 
@@ -35,6 +36,9 @@ type Queue struct {
 	cancelCur    context.CancelFunc
 	userCanceled bool
 	detail       string // latest progress line of the current job
+
+	// AfterJob, if set, is called with a series' ID once its job has finished.
+	AfterJob func(id string)
 }
 
 const (
@@ -203,12 +207,27 @@ func (q *Queue) Work(ctx context.Context, d *download.Downloader, o download.Opt
 		if err := q.st.Finish(bg, j.ID, state, detail); err != nil {
 			log.Printf("recording result for %s: %v", j.Name(), err)
 		}
+		if q.AfterJob != nil {
+			q.AfterJob(j.ID)
+		}
 	}
 }
 
 // RunDaemon runs the download worker and its local control API.
 func RunDaemon(ctx context.Context, d *download.Downloader, addr string, st store.Store, o download.Options) error {
 	q := New(st)
+	if p, ok := st.(store.Progress); ok {
+		sc := &progress.Scanner{Store: p, Out: o.Out, Format: o.Format}
+		q.AfterJob = func(id string) {
+			// The scan must happen even while shutting down, so it can't use ctx.
+			sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := sc.ScanOne(sctx, id); err != nil {
+				log.Printf("progress scan: %v", err)
+			}
+		}
+		go sc.Run(ctx)
+	}
 	jobs, _ := st.List(ctx)
 	active := 0
 	for _, j := range jobs {

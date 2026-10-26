@@ -65,6 +65,11 @@ The sync process is the only one that needs your MangaDex credentials. The API n
 library, it reads what sync stored. The daemon claims jobs from Postgres with leases and heartbeats, so a job whose
 daemon died is detected and retried rather than lost.
 
+The daemon also lists the output directory (folder names only, never file contents) on start, after each finished
+job and every 15 minutes, and records how many of each title's expected chapters are on disk. The API serves that
+as `downloaded` and `dl_status` (`none`, `partial`, `up_to_date` or `complete`). If the output directory is missing
+or empty, for example an unmounted share, the last counts are kept.
+
 ## Credentials
 
 Downloading a single series needs no account. `-library` and `-sync` do.

@@ -132,3 +132,28 @@ func TestChaptersKeepsExternalOnes(t *testing.T) {
 		t.Fatalf("Chapters = %+v, %v; want the hosted copy to replace the external one", chs, err)
 	}
 }
+
+func TestDownloadStatus(t *testing.T) {
+	for _, c := range []struct {
+		status          string
+		downloaded, all int
+		want            string
+	}{
+		{"ongoing", 0, 10, DLNone},
+		{"ongoing", 4, 10, DLPartial},
+		{"ongoing", 10, 10, DLUpToDate},
+		{"completed", 10, 10, DLComplete},
+		{"cancelled", 10, 10, DLComplete},
+		{"hiatus", 10, 10, DLComplete},
+		{"completed", 9, 10, DLPartial},
+		{"completed", 0, 10, DLNone},
+		{"ongoing", 5, 0, DLNone}, // nothing to compare against
+		{"ongoing", 0, 0, DLNone},
+		{"", 3, 3, DLComplete},
+	} {
+		m := Manga{Status: c.status, Downloaded: c.downloaded, Chapters: c.all}
+		if got := m.DownloadStatus(); got != c.want {
+			t.Errorf("%s %d/%d = %q, want %q", c.status, c.downloaded, c.all, got, c.want)
+		}
+	}
+}
