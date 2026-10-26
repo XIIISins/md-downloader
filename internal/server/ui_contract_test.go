@@ -75,3 +75,40 @@ func TestUIRequestsMatchRoutes(t *testing.T) {
 		}
 	}
 }
+
+// Every element id app.js looks up must exist in index.html; a renamed or
+// removed id would otherwise only fail in the browser, on a null lookup.
+func TestUIElementIDsExist(t *testing.T) {
+	files := web.FS()
+	js, err := fs.ReadFile(files, "static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := fs.ReadFile(files, "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	have := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\bid="([^"]+)"`).FindAllStringSubmatch(string(html), -1) {
+		have[m[1]] = true
+	}
+	// Quoted '#id' selectors; all-hex literals such as '#ffffff' are colours.
+	hex := regexp.MustCompile(`^[0-9a-fA-F]{3,8}$`)
+	n := 0
+	for _, m := range regexp.MustCompile(`'#([A-Za-z][A-Za-z0-9]*)'`).FindAllStringSubmatch(string(js), -1) {
+		if hex.MatchString(m[1]) {
+			continue
+		}
+		n++
+		if !have[m[1]] {
+			t.Errorf("app.js looks up #%s, which index.html does not define", m[1])
+		}
+	}
+	if n < 20 {
+		t.Errorf("found only %d id lookups in app.js; the extraction is probably broken", n)
+	}
+	if !have["fDl"] {
+		t.Error("index.html has no #fDl (Download status filter)")
+	}
+}

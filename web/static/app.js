@@ -3,7 +3,7 @@ const $ = (s) => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
-    if (k.startsWith('aria-') || k === 'role') e.setAttribute(k, v);
+    if (k.startsWith('aria-') || k.startsWith('data-') || k === 'role') e.setAttribute(k, v);
     else if (k === 'style') e.style.cssText = v;
     else e[k] = v;
   }
@@ -146,9 +146,21 @@ const byNum = (f, dir) => (a, b) => {
   if (!x !== !y) return x ? -1 : 1;
   return dir * (x - y) || a.title.localeCompare(b.title);
 };
-const S = { items: [], byId: new Map(), groups: {}, hasGroups: false, sel: new Set(), tags: new Map(), mode: 'any', q: '', rating: '', demo: '', status: '', lang: '', from: 0, to: 0, sort: P.sort, view: P.view };
+const S = { items: [], byId: new Map(), groups: {}, hasGroups: false, sel: new Set(), tags: new Map(), mode: 'any', q: '', rating: '', demo: '', status: '', dl: '', lang: '', from: 0, to: 0, sort: P.sort, view: P.view };
 const Q = new Map(); // series id -> job from the downloader's queue
 const locked = (id) => { const j = Q.get(id); return !!j && (j.state === 'queued' || j.state === 'running'); };
+
+/* download status of a title: the live queue wins over what is on disk (dl_status from the API, absent on older servers) */
+const DL = { downloading: 'Downloading', queued: 'In queue', partial: 'Partial', up_to_date: 'Up to date', complete: 'Complete', none: 'Not downloaded' };
+const DOT = { downloading: 'busy', queued: 'busy', partial: 'partial', up_to_date: 'ok', complete: 'ok' };
+function dlState(it) {
+  const j = Q.get(it.id);
+  if (j && j.state === 'running') return 'downloading';
+  if (j && j.state === 'queued') return 'queued';
+  return DL[it.dl_status] ? it.dl_status : '';
+}
+// A status dot; "none" has no dot. The text label (or the title/aria-label of the caller) carries the meaning too.
+const dot = (st) => el('i', { className: 'dot', 'data-st': DOT[st], 'data-run': st === 'downloading' ? '1' : '0', 'aria-hidden': 'true' });
 
 /* banner for errors from the API and short notices */
 let bannerKind = '', bannerTimer = 0;
@@ -171,17 +183,12 @@ async function post(path, body) {
   return res;
 }
 
-async function load() {
-  let items;
-  try {
-    const res = await fetch('/api/library');
-    if (!res.ok) throw new Error(await errorText(res));
-    items = await res.json();
-  } catch (e) {
-    $('#count').textContent = 'Could not load the library.';
-    showBanner('Could not load the library: ' + e.message);
-    return;
-  }
+async function fetchLibrary() {
+  const res = await fetch('/api/library');
+  if (!res.ok) throw new Error(await errorText(res));
+  return res.json();
+}
+function ingest(items) {
   for (const it of items) {
     it.tags = it.tags || [];
     Object.assign(S.groups, it.tag_groups); // global tag -> format|genre|theme|content map
@@ -189,6 +196,16 @@ async function load() {
   S.items = items; S.byId = new Map(items.map((i) => [i.id, i]));
   S.hasGroups = Object.keys(S.groups).length > 0;
   S.hasChapters = items.some((i) => i.chapters > 0);
+  S.hasDl = items.some((i) => i.dl_status);
+}
+async function load() {
+  let items;
+  try { items = await fetchLibrary(); } catch (e) {
+    $('#count').textContent = 'Could not load the library.';
+    showBanner('Could not load the library: ' + e.message);
+    return;
+  }
+  ingest(items);
   SORTS.title = ['Title A to Z', (a, b) => a.title.localeCompare(b.title)];
   SORTS.titleZ = ['Title Z to A', (a, b) => b.title.localeCompare(a.title)];
   SORTS.rating = ['Highest rated', byNum('rating', -1)];
@@ -201,6 +218,10 @@ async function load() {
   initFilters(); render(); poll();
 }
 load();
+// A finished job changes what is on disk, so fetch the library again to refresh the statuses.
+async function refreshLibrary() {
+  try { ingest(await fetchLibrary()); render(); } catch { /* keep the old statuses until the next change */ }
+}
 
 /* filters */
 function initFilters() {
@@ -210,6 +231,8 @@ function initFilters() {
     [...m].sort((a, b) => b[1] - a[1]).forEach(([v, n]) => sel.append(el('option', { value: v, textContent: `${label(v)} (${n})` })));
     sel.closest('label').hidden = m.size === 0; // nothing to filter by, e.g. the API doesn't send content ratings yet
   };
+  $('#fDl').closest('label').hidden = !S.hasDl; // older servers don't report what is on disk
+  Object.keys(DL).forEach((k) => $('#fDl').append(el('option', { value: k, textContent: DL[k] })));
   fill($('#fRating'), (i) => i.content_rating); fill($('#fDemo'), (i) => i.demographic);
   fill($('#fStatus'), (i) => i.status); fill($('#fLang'), (i) => i.lang, (v) => LANG[v] || v.toUpperCase());
   Object.entries(SORTS).forEach(([k, [l]]) => $('#fSort').append(el('option', { value: k, textContent: l })));
@@ -218,14 +241,14 @@ function initFilters() {
     S[key] = num ? +e.target.value || 0 : e.target.value;
     clearTimeout(timer); timer = setTimeout(render, key === 'q' ? 120 : 0);
   });
-  bind('#fSort', 'sort'); bind('#fRating', 'rating'); bind('#fDemo', 'demo'); bind('#fStatus', 'status'); bind('#fLang', 'lang');
+  bind('#fSort', 'sort'); bind('#fRating', 'rating'); bind('#fDemo', 'demo'); bind('#fStatus', 'status'); bind('#fDl', 'dl'); bind('#fLang', 'lang');
   bind('#yFrom', 'from', 1); bind('#yTo', 'to', 1); bind('#q', 'q');
   $('#fSort').value = S.sort;
   document.querySelectorAll('#filters select').forEach((s) => { const ph = document.createComment(''); s.replaceWith(ph); ph.replaceWith(dropdown(s)); });
   $('#toggleFilters').onclick = () => { const f = $('#filters'); closeAll(); f.hidden = !f.hidden; $('#toggleFilters').setAttribute('aria-expanded', !f.hidden); };
   $('#reset').onclick = () => {
-    Object.assign(S, { q: '', rating: '', demo: '', status: '', lang: '', from: 0, to: 0, mode: 'any' }); S.tags.clear();
-    ['#q', '#fRating', '#fDemo', '#fStatus', '#fLang', '#yFrom', '#yTo'].forEach((i) => ($(i).value = ''));
+    Object.assign(S, { q: '', rating: '', demo: '', status: '', dl: '', lang: '', from: 0, to: 0, mode: 'any' }); S.tags.clear();
+    ['#q', '#fRating', '#fDemo', '#fStatus', '#fDl', '#fLang', '#yFrom', '#yTo'].forEach((i) => ($(i).value = ''));
     render();
   };
   $('#lucky').onclick = () => { const l = list(); if (l.length) openDetail(l[Math.floor(Math.random() * l.length)], $('#lucky')); };
@@ -241,7 +264,7 @@ function list() {
   const inc = [...S.tags].filter(([, v]) => v === 'in').map(([t]) => t), exc = [...S.tags].filter(([, v]) => v === 'out').map(([t]) => t);
   const years = S.from || S.to; // series with no known year are hidden while a bound is set
   return S.items.filter((i) => (!q || i.title.toLowerCase().includes(q)) && (!S.rating || i.content_rating === S.rating) && (!S.demo || i.demographic === S.demo)
-    && (!S.status || i.status === S.status) && (!S.lang || i.lang === S.lang)
+    && (!S.status || i.status === S.status) && (!S.dl || dlState(i) === S.dl) && (!S.lang || i.lang === S.lang)
     && (!years || (i.year > 0 && (!S.from || i.year >= S.from) && (!S.to || i.year <= S.to)))
     && (S.mode === 'all' ? inc.every((t) => i.tags.includes(t)) : !inc.length || inc.some((t) => i.tags.includes(t))) && !exc.some((t) => i.tags.includes(t))).sort(SORTS[S.sort][1]);
 }
@@ -251,21 +274,34 @@ function render() {
   g.className = 'grid ' + S.view;
   g.replaceChildren(...rows.map(card));
   $('#count').textContent = rows.length ? `${rows.length} of ${S.items.length} series` : S.items.length ? 'No series match these filters.' : 'Nothing in this library yet.';
-  const n = [S.rating, S.demo, S.status, S.lang, S.from || S.to, S.tags.size].filter(Boolean).length;
+  const n = [S.rating, S.demo, S.status, S.dl, S.lang, S.from || S.to, S.tags.size].filter(Boolean).length;
   const b = $('#fcount'); b.hidden = !n; b.textContent = n;
   $('#toggleFilters').setAttribute('aria-label', n ? `Filters, ${n} active` : 'Filters');
   const tl = S.tags.size ? [...S.tags].map(([t, v]) => (v === 'out' ? '−' : '') + t).slice(0, 2).join(', ') + (S.tags.size > 2 ? ` +${S.tags.size - 2}` : '') : 'Any';
   $('#tagLabel').textContent = tl; $('#tagBtn').classList.toggle('on', S.tags.size > 0);
+  dlCounts();
   dock();
 }
 
-const metaLine = (it, withYear) => [it.rating ? `★ ${it.rating.toFixed(1)}` : '', it.chapters ? `${it.chapters} ch` : '', withYear ? it.year || '' : '', cap(it.status)].filter(Boolean).join('  ·  ');
+// Counts in the Download status filter follow the queue, so they are refreshed on every render.
+function dlCounts() {
+  const sel = $('#fDl');
+  if (!S.hasDl || !sel) return;
+  const n = {};
+  S.items.forEach((i) => { const k = dlState(i); n[k] = (n[k] || 0) + 1; });
+  [...sel.options].forEach((o) => { if (o.value) o.textContent = `${DL[o.value]} (${n[o.value] || 0})`; });
+  sel.value = S.dl; // re-sync the themed button's label
+}
+
+const metaLine = (it, withYear) => [it.rating ? `★ ${it.rating.toFixed(1)}` : '', it.chapters ? (it.downloaded > 0 ? `${it.downloaded}/${it.chapters} ch` : `${it.chapters} ch`) : '', withYear ? it.year || '' : '', cap(it.status)].filter(Boolean).join('  ·  ');
 
 function card(it) {
-  const j = Q.get(it.id), lock = locked(it.id);
+  const lock = locked(it.id), st = dlState(it), shown = DOT[st] ? st : '';
   const li = el('div', { className: 'p' });
-  const art = el('button', { className: 'art', type: 'button', 'aria-label': `Open ${it.title}`, onclick: () => openDetail(it, art) }, el('img', { loading: 'lazy', alt: '', src: cover(it.id) }));
-  if (lock) art.append(el('span', { className: 'badge', 'data-k': j.state }, el('i'), j.state === 'running' ? 'Downloading' : 'In queue'));
+  const art = el('button', { className: 'art', type: 'button', 'aria-label': `Open ${it.title}` + (st ? `, ${DL[st]}` : ''), onclick: () => openDetail(it, art) }, el('img', { loading: 'lazy', alt: '', src: cover(it.id) }));
+  // Posters show a dot on the cover (status in its title); rows and list show the dot with the label.
+  if (shown && S.view === 'posters') { const d = dot(st); d.title = DL[st]; art.append(d); }
+  const dl = shown && S.view !== 'posters' ? el('span', { className: 'dl' }, dot(st), DL[st]) : '';
   const plus = el('button', { className: 'plus', type: 'button', 'aria-label': `Add ${it.title} to downloads`, disabled: lock });
   const paint = () => {
     const on = S.sel.has(it.id);
@@ -276,13 +312,14 @@ function card(it) {
   paint();
   const meta = metaLine(it, S.view !== 'posters');
   const body = [el('div', { className: 't', textContent: it.title }), el('div', { className: 'm', textContent: meta })];
+  if (S.view === 'rows') body.splice(2, 0, dl);
   if (S.view === 'rows') {
     body.push(el('p', { className: 'sum', textContent: it.description }));
     body.push(el('div', { className: 'rtags' }, ...it.tags.slice(0, 7).map((t) => el('span', { textContent: t }))));
   }
   li.append(...(S.view === 'posters' ? [el('div', { style: 'position:relative' }, art, plus), ...body]
     : S.view === 'rows' ? [art, el('div', {}, ...body), plus]
-    : [art, el('div', {}, body[0]), el('span', { className: 'stat', textContent: meta }), plus]));
+    : [art, el('div', {}, body[0], dl), el('span', { className: 'stat', textContent: meta }), plus]));
   if (S.view === 'rows') plus.style.alignSelf = 'start';
   return li;
 }
@@ -346,12 +383,15 @@ function openDetail(it, from) {
     it.rating ? fact('★ ' + it.rating.toFixed(2), 'rating') : '', it.chapters ? fact(String(it.chapters), 'chapters') : '',
     it.follows ? fact(it.follows.toLocaleString(), 'follows') : '', it.year ? fact(String(it.year)) : '', it.status ? fact(cap(it.status)) : '',
     it.demographic ? fact(cap(it.demographic)) : '', fact('', LANG[it.lang] || it.lang), it.content_rating ? fact('', cap(it.content_rating)) : '');
-  const busy = j && (j.state === 'queued' || j.state === 'running');
-  const main = el('button', { className: 'main', type: 'button', disabled: busy, textContent: busy ? 'In queue' : on ? 'Added to downloads' : j ? 'Download again' : 'Add to downloads' });
+  const st = dlState(it), busy = st === 'queued' || st === 'downloading';
+  const again = { partial: 'Download missing', up_to_date: 'Check for new chapters', complete: 'Check for new chapters' }[st] || (j ? 'Download again' : 'Add to downloads');
+  const main = el('button', { className: 'main', type: 'button', disabled: busy, textContent: busy ? DL[st] : on ? 'Added to downloads' : again });
+  const have = it.downloaded > 0 && it.chapters > 0 ? ` · ${it.downloaded} of ${it.chapters} chapters downloaded` : '';
+  const status = st ? el('p', { className: 'dl' }, DOT[st] ? dot(st) : '', DL[st] + have) : '';
   main.onclick = () => { S.sel.add(it.id); closeDetail(); render(); };
   d.setAttribute('aria-label', it.title);
   d.replaceChildren(back, x, el('div', { className: 'wrap' }, el('img', { alt: '', src: cover(it.id) }),
-    el('div', {}, el('h2', { textContent: it.title }), facts, el('p', { className: 'desc', textContent: it.description || 'No summary.' }),
+    el('div', {}, el('h2', { textContent: it.title }), facts, status, el('p', { className: 'desc', textContent: it.description || 'No summary.' }),
       el('div', { className: 'rtags' }, ...it.tags.map((t) => el('span', { textContent: t }))),
       el('div', { className: 'cta' }, main, el('button', { type: 'button', textContent: 'Close', onclick: closeDetail })))));
   d.hidden = false; $('#scrim').hidden = false; d.scrollTop = 0; x.focus();
@@ -513,7 +553,7 @@ $('#qAdd').onclick = async () => {
 $('#qToggle').onclick = () => pop('queue');
 
 /* one round trip to the downloader's queue (through this server); re-render the cards only when the set of locked series changes */
-let sig = '';
+let sig = '', active = new Set();
 async function pollOnce() {
   const res = await fetch('/api/queue');
   const p = await res.json().catch(() => ({}));
@@ -523,7 +563,11 @@ async function pollOnce() {
   for (const j of p.jobs || []) Q.set(j.id, j);
   S.sel.forEach((id) => { if (locked(id)) S.sel.delete(id); });
   const next = jobsNow().map((j) => j.id + j.state).sort().join();
+  const act = new Set(jobsNow().filter((j) => locked(j.id)).map((j) => j.id));
+  const finished = S.hasDl && [...active].some((id) => !act.has(id));
+  active = act;
   if (next !== sig) { sig = next; render(); } else dock();
+  if (finished) refreshLibrary();
 }
 async function poll() {
   let wait = 1500;
