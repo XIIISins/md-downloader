@@ -38,8 +38,8 @@ type Manga struct {
 	// TagGroups maps each of this title's Tags to its MangaDex group (format,
 	// genre, theme or content).
 	TagGroups map[string]string `json:"tag_groups"`
-	// Chapters counts downloadable chapters in the configured language. See
-	// DownloadableChapters for how exact it is.
+	// Chapters counts the distinct downloadable chapters in the configured
+	// language: one per chapter file the downloader would write.
 	Chapters int     `json:"chapters"`
 	Year     int     `json:"year"`
 	Rating   float64 `json:"rating"`
@@ -72,6 +72,34 @@ func (c *Client) MangaTitle(ctx context.Context, id string) (string, error) {
 // Chapters lists a series' chapters in the given language, one per
 // volume/chapter number.
 func (c *Client) Chapters(ctx context.Context, id, lang string, ratings []string) ([]Chapter, error) {
+	return c.feed(ctx, id, lang, ratings, nil)
+}
+
+// DownloadableChapters lists the chapters of a series in lang that are hosted
+// on MangaDex (no external link, not empty), one per volume/chapter number,
+// exactly as Chapters would list them minus the ones that can't be downloaded.
+func (c *Client) DownloadableChapters(ctx context.Context, id, lang string, ratings []string) ([]Chapter, error) {
+	extra := url.Values{}
+	extra.Set("includeExternalUrl", "0")
+	extra.Set("includeEmptyPages", "0")
+	all, err := c.feed(ctx, id, lang, ratings, extra)
+	if err != nil {
+		return nil, err
+	}
+	n := 0
+	for _, ch := range all {
+		if ch.Downloadable() {
+			all[n] = ch
+			n++
+		}
+	}
+	return all[:n], nil
+}
+
+// feed pages through a series' chapter feed, 500 entries per request, and
+// merges the entries several groups uploaded for the same chapter. extra adds
+// query parameters.
+func (c *Client) feed(ctx context.Context, id, lang string, ratings []string, extra url.Values) ([]Chapter, error) {
 	var all []Chapter
 	seen := map[string]int{} // chapter key -> index in all
 	for offset := 0; ; {
@@ -81,6 +109,9 @@ func (c *Client) Chapters(ctx context.Context, id, lang string, ratings []string
 		q.Add("translatedLanguage[]", lang)
 		q.Set("order[volume]", "asc")
 		q.Set("order[chapter]", "asc")
+		for k, vs := range extra {
+			q[k] = vs
+		}
 		for _, r := range ratings {
 			q.Add("contentRating[]", r)
 		}
@@ -276,38 +307,6 @@ func (c *Client) MangaDetails(ctx context.Context, ids []string, lang string) ([
 		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
 	})
 	return items, nil
-}
-
-// HasDownloadable reports whether a title has at least one chapter in lang that
-// actually has pages on MangaDex (not an external link and not empty), for the
-// given content ratings.
-func (c *Client) HasDownloadable(ctx context.Context, id, lang string, ratings []string) (bool, error) {
-	n, err := c.DownloadableChapters(ctx, id, lang, ratings)
-	return n > 0, err
-}
-
-// DownloadableChapters returns how many chapters a title has in lang that are
-// hosted on MangaDex (no external link, not empty), for the given content
-// ratings. It reads the feed's total with limit=1, so it is a single request.
-// The total counts one entry per scanlation group, so a chapter uploaded by
-// several groups is counted several times and the result can run a bit above
-// the true number of chapters.
-func (c *Client) DownloadableChapters(ctx context.Context, id, lang string, ratings []string) (int, error) {
-	q := url.Values{}
-	q.Set("limit", "1")
-	q.Add("translatedLanguage[]", lang)
-	q.Set("includeExternalUrl", "0")
-	q.Set("includeEmptyPages", "0")
-	for _, r := range ratings {
-		q.Add("contentRating[]", r)
-	}
-	var r struct {
-		Total int `json:"total"`
-	}
-	if err := c.getJSON(ctx, c.APILimit, fmt.Sprintf("%s/manga/%s/feed?%s", c.BaseURL, id, q.Encode()), &r); err != nil {
-		return 0, err
-	}
-	return r.Total, nil
 }
 
 // addStatistics fills in rating and follows. Best effort: failures are ignored.

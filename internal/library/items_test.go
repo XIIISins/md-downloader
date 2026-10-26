@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,11 @@ func fakeAPI(t *testing.T) *mangadex.Client {
 				"originalLanguage":"ja","contentRating":"safe",
 				"tags":[{"attributes":{"name":{"en":"Fantasy"},"group":"genre"}}]},"relationships":[]}]}`))
 		case strings.HasSuffix(r.URL.Path, "/feed"):
-			w.Write([]byte(`{"total":9,"data":[]}`))
+			// Two groups uploaded chapter 1, so 3 entries are 2 chapters.
+			w.Write([]byte(`{"total":3,"data":[
+				{"id":"x","attributes":{"volume":null,"chapter":"1","pages":10}},
+				{"id":"y","attributes":{"volume":null,"chapter":"1","pages":11}},
+				{"id":"z","attributes":{"volume":null,"chapter":"2.5","pages":9}}]}`))
 		default:
 			w.Write([]byte(`{"statistics":{}}`))
 		}
@@ -43,8 +48,21 @@ func TestLoadItemsCarriesNewMetadata(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("LoadItems = %v, %v", items, err)
 	}
-	if it := items[0]; it.Chapters != 9 || it.ContentRating != "safe" || it.TagGroups["Fantasy"] != "genre" {
+	if it := items[0]; it.Chapters != 2 || it.ContentRating != "safe" || it.TagGroups["Fantasy"] != "genre" {
 		t.Errorf("metadata not carried through: %+v", it)
+	}
+}
+
+func TestLoadItemsRecordsChapterKeys(t *testing.T) {
+	mc := LoadCache(&memPersister{})
+	if _, err := LoadItems(context.Background(), fakeAPI(t), []string{"a"}, "en", []string{"safe"}, mc, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mc.ChapterKeys("a"), []string{"0001", "0002.5"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ChapterKeys = %v, want %v", got, want)
+	}
+	if mc.ChapterKeys("unknown") != nil {
+		t.Error("unknown title has keys")
 	}
 }
 
@@ -72,7 +90,7 @@ func TestOldCacheIsDiscarded(t *testing.T) {
 	}
 
 	items, err := LoadItems(context.Background(), fakeAPI(t), []string{"a"}, "en", []string{"safe"}, mc, false)
-	if err != nil || len(items) != 1 || items[0].Chapters != 9 || items[0].ContentRating != "safe" {
+	if err != nil || len(items) != 1 || items[0].Chapters != 2 || items[0].ContentRating != "safe" {
 		t.Fatalf("after reset: %+v, %v", items, err)
 	}
 

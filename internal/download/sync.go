@@ -68,7 +68,7 @@ func (d *Downloader) SyncManga(ctx context.Context, id string, o Options, logf f
 			continue
 		}
 
-		name := "ch" + padNumber(ch.Number)
+		name := "ch" + ChapterKey(ch.Number)
 		dir := filepath.Join(mangaDir, name)
 		cbz := dir + ".cbz"
 

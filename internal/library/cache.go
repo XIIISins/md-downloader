@@ -27,13 +27,14 @@ type cacheEntry struct {
 	CheckKey     string    `json:"checkKey"` // language + ratings the check ran with
 	Checked      time.Time `json:"checked"`
 	Downloadable bool      `json:"downloadable"`
-	Chapters     int       `json:"chapters"` // downloadable chapter count from the same check
+	Chapters     int       `json:"chapters"` // distinct downloadable chapters from the same check
+	Keys         []string  `json:"keys"`     // their file keys (download.ChapterKey)
 }
 
 // cacheVersion is bumped when cached entries gain fields that older entries
 // lack. A cache written by another version is discarded, so every title's
 // metadata is re-read once.
-const cacheVersion = 2
+const cacheVersion = 3
 
 // Persister stores the cache's serialized form.
 type Persister interface {
@@ -92,6 +93,15 @@ func LoadCache(p Persister) *Cache {
 // LoadCacheDir loads the cache file (library.json) in dir.
 func LoadCacheDir(dir string) *Cache {
 	return LoadCache(FilePersister(filepath.Join(dir, "library.json")))
+}
+
+// ChapterKeys returns the file keys of the title's downloadable chapters as of
+// its last check, or nil if it was never checked.
+func (mc *Cache) ChapterKeys(id string) []string {
+	if e := mc.Entries[id]; e != nil {
+		return e.Keys
+	}
+	return nil
 }
 
 func (mc *Cache) save() error {

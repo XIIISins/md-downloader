@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiiisins/md-downloader/internal/download"
 	"github.com/xiiisins/md-downloader/internal/mangadex"
 )
 
@@ -52,11 +53,12 @@ func LoadItems(ctx context.Context, c *mangadex.Client, ids []string, lang strin
 			continue
 		}
 		if refresh || e.CheckKey != key || now.Sub(e.Checked) > checkTTL {
-			n, err := c.DownloadableChapters(ctx, id, lang, ratings)
+			chs, err := c.DownloadableChapters(ctx, id, lang, ratings)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", e.Item.Title, err)
 			}
-			e.CheckKey, e.Checked, e.Downloadable, e.Chapters = key, time.Now(), n > 0, n
+			keys := download.ChapterKeys(chs)
+			e.CheckKey, e.Checked, e.Downloadable, e.Chapters, e.Keys = key, time.Now(), len(keys) > 0, len(keys), keys
 			if checked++; checked%25 == 0 {
 				log.Printf("  checked %d (at %d/%d)", checked, i+1, len(ids))
 			}

@@ -16,11 +16,14 @@ type File struct {
 	mu   sync.Mutex
 	path string
 	jobs []*Job
+
+	progress map[string]Expected // see file_progress.go
 }
 
 // OpenFile loads the queue at path; a missing or corrupt file is an empty queue.
 func OpenFile(path string) *File {
-	f := &File{path: path}
+	f := &File{path: path, progress: map[string]Expected{}}
+	f.loadProgress()
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &f.jobs)
 	}

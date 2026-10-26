@@ -27,3 +27,22 @@ func TestFileResumesRunningJobs(t *testing.T) {
 		t.Fatalf("after restart: %+v", jobs)
 	}
 }
+
+func TestFileProgress(t *testing.T) {
+	storetest.RunProgress(t, func(t *testing.T) store.Progress {
+		return store.OpenFile(filepath.Join(t.TempDir(), "queue.json"))
+	})
+}
+
+func TestFileProgressPersists(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "queue.json")
+	f := store.OpenFile(path)
+	f.SetExpected(ctx, []store.Expected{{ID: "a", Title: "Alpha", Keys: []string{"0001"}}})
+	f.SetDownloaded(ctx, "a", 1)
+
+	got, _ := store.OpenFile(path).Expected(ctx)
+	if len(got) != 1 || got[0].Downloaded != 1 || got[0].Keys[0] != "0001" {
+		t.Fatalf("after restart: %+v", got)
+	}
+}
