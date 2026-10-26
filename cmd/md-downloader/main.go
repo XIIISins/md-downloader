@@ -109,7 +109,17 @@ func main() {
 			Client: c,
 			Items: func(ctx context.Context) ([]mangadex.Manga, error) {
 				items, _, err := ps.Library(ctx)
-				return items, err
+				if err != nil {
+					return nil, err
+				}
+				done, err := ps.Downloaded(ctx)
+				if err != nil { // the listing is still useful without the on-disk counts
+					log.Printf("download counts unavailable: %v", err)
+				}
+				for i := range items {
+					items[i].Downloaded = done[items[i].ID]
+				}
+				return items, nil
 			},
 			Backend:   server.StoreBackend{Store: ps},
 			CoverDir:  filepath.Join(*cacheDir, "covers"),

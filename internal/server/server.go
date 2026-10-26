@@ -151,6 +151,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		if it.TagGroups == nil {
 			it.TagGroups = map[string]string{}
 		}
+		it.DLStatus = it.DownloadStatus()
 		out[i] = it
 	}
 	httpx.WriteJSON(w, out)

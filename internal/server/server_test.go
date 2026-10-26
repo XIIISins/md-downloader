@@ -110,7 +110,7 @@ func TestBackendErrorsReachThePage(t *testing.T) {
 func TestLibraryJSONShape(t *testing.T) {
 	items := []mangadex.Manga{
 		{ID: "a", Title: "Alpha", Tags: []string{"Fantasy"}, ContentRating: "safe",
-			TagGroups: map[string]string{"Fantasy": "genre"}, Chapters: 7},
+			TagGroups: map[string]string{"Fantasy": "genre"}, Chapters: 7, Status: "completed", Downloaded: 7},
 		{ID: "legacy", Title: "Legacy"}, // synced before the new fields existed
 	}
 	h := New(Config{
@@ -126,7 +126,7 @@ func TestLibraryJSONShape(t *testing.T) {
 		t.Fatalf("library = %d %s (%v)", rec.Code, rec.Body, err)
 	}
 	for _, it := range got {
-		for _, key := range []string{"id", "title", "tags", "demographic", "content_rating", "tag_groups", "chapters"} {
+		for _, key := range []string{"id", "title", "tags", "demographic", "content_rating", "tag_groups", "chapters", "downloaded", "dl_status"} {
 			if _, ok := it[key]; !ok {
 				t.Errorf("item %v lacks %q", it["id"], key)
 			}
@@ -137,6 +137,12 @@ func TestLibraryJSONShape(t *testing.T) {
 	}
 	if g := got[0]["tag_groups"].(map[string]any); g["Fantasy"] != "genre" || got[0]["chapters"] != float64(7) || got[0]["content_rating"] != "safe" {
 		t.Errorf("values not served: %v", got[0])
+	}
+	if got[0]["downloaded"] != float64(7) || got[0]["dl_status"] != "complete" {
+		t.Errorf("download status not served: %v", got[0])
+	}
+	if got[1]["downloaded"] != float64(0) || got[1]["dl_status"] != "none" {
+		t.Errorf("legacy row must read as none/0: %v", got[1])
 	}
 	if items[1].TagGroups != nil {
 		t.Error("handler modified the shared items")

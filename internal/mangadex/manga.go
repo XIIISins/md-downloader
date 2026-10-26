@@ -40,11 +40,39 @@ type Manga struct {
 	TagGroups map[string]string `json:"tag_groups"`
 	// Chapters counts the distinct downloadable chapters in the configured
 	// language: one per chapter file the downloader would write.
-	Chapters int     `json:"chapters"`
-	Year     int     `json:"year"`
-	Rating   float64 `json:"rating"`
-	Follows  int     `json:"follows"`
-	Cover    string  `json:"-"` // cover file name on uploads.mangadex.org
+	Chapters int `json:"chapters"`
+	// Downloaded is how many of those chapters are on disk, from the daemon's
+	// last scan. DLStatus is derived from it, see DownloadStatus.
+	Downloaded int     `json:"downloaded"`
+	DLStatus   string  `json:"dl_status"`
+	Year       int     `json:"year"`
+	Rating     float64 `json:"rating"`
+	Follows    int     `json:"follows"`
+	Cover      string  `json:"-"` // cover file name on uploads.mangadex.org
+}
+
+// Download statuses, from how much of a series is on disk.
+const (
+	DLNone     = "none"
+	DLPartial  = "partial"
+	DLUpToDate = "up_to_date" // everything is here and the series is still running
+	DLComplete = "complete"   // everything is here and the series has ended
+)
+
+// DownloadStatus derives the on-disk state from Downloaded, Chapters and Status.
+// Series that are completed, cancelled or on hiatus count as complete; any other
+// status is treated as ongoing.
+func (m Manga) DownloadStatus() string {
+	switch {
+	case m.Downloaded <= 0 || m.Chapters <= 0:
+		return DLNone
+	case m.Downloaded < m.Chapters:
+		return DLPartial
+	case m.Status == "ongoing":
+		return DLUpToDate
+	default:
+		return DLComplete
+	}
 }
 
 // MangaTitle returns the English title of a series, or any title if it has none.
