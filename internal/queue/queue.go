@@ -227,6 +227,9 @@ func RunDaemon(ctx context.Context, d *download.Downloader, addr string, st stor
 			}
 		}
 		go sc.Run(ctx)
+		log.Printf("Progress scan enabled for %s (every %s, sooner after a job finishes)", o.Out, progress.Interval)
+	} else {
+		log.Print("Progress scan disabled: this queue store does not record chapter progress")
 	}
 	jobs, _ := st.List(ctx)
 	active := 0
