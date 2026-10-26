@@ -1,8 +1,11 @@
+/* Self-hosted fonts (SIL OFL 1.1, licences in static/fonts). Variable files, latin subset. */
+@font-face { font-family: "Bricolage Grotesque"; src: url("/static/fonts/bricolage-grotesque-latin.woff2") format("woff2"); font-weight: 500 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Figtree"; src: url("/static/fonts/figtree-latin.woff2") format("woff2"); font-weight: 400 600; font-style: normal; font-display: swap; }
 :root { --hue: 285; --poster: 150px;
   --bg: #f4f4f6; --surface: #ffffff; --raise: #ebebef; --text: #14141a; --text-2: #55565f; --text-3: #8b8c96;
   --accent: oklch(.58 .2 var(--hue)); --accent-ink: #ffffff; --run: #19a266; --wait: #c98a12; --bad: #d64545;
   --glass: rgba(255,255,255,.72); --shadow: 0 10px 30px rgba(20,20,30,.16);
-  --display: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif; --body: system-ui, -apple-system, "Segoe UI", sans-serif; --pad: 20px; }
+  --display: "Bricolage Grotesque", ui-rounded, system-ui, -apple-system, "Segoe UI", sans-serif; --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif; --pad: 20px; }
 :root[data-theme=dark] { --bg: #16171d; --surface: #1e1f27; --raise: #292a35; --text: #eeeef3; --text-2: #b3b4c0; --text-3: #81828f;
   --accent: oklch(.74 .15 var(--hue)); --accent-ink: #0d0d11; --run: #4cd08c; --wait: #e5ae45; --bad: #ff7a7a;
   --glass: rgba(30,30,40,.7); --shadow: 0 12px 34px rgba(0,0,0,.5); }
