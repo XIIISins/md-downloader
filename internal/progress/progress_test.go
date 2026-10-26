@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/xiiisins/md-downloader/internal/download"
 	"github.com/xiiisins/md-downloader/internal/store"
@@ -98,8 +99,12 @@ func TestScanAllAndOne(t *testing.T) {
 	touch(t, filepath.Join(out, "Beta", "ch0001.cbz"))
 	sc, st := newScanner(t, out)
 
-	if err := sc.ScanAll(ctx); err != nil {
+	r, err := sc.ScanAll(ctx)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if want := (Result{Titles: 2, WithKey: 2, OnDisk: 2, Changed: 2}); r != want {
+		t.Errorf("first scan = %+v, want %+v", r, want)
 	}
 	if got, _ := st.Downloaded(ctx); got["a"] != 1 || got["b"] != 1 {
 		t.Fatalf("after ScanAll: %v", got)
@@ -114,7 +119,7 @@ func TestScanAllAndOne(t *testing.T) {
 	if got, _ := st.Downloaded(ctx); got["a"] != 2 || got["b"] != 1 {
 		t.Fatalf("ScanOne must touch only its title: %v", got)
 	}
-	if err := sc.ScanAll(ctx); err != nil {
+	if _, err := sc.ScanAll(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := st.Downloaded(ctx); got["a"] != 2 || got["b"] != 0 {
@@ -131,7 +136,7 @@ func TestUnavailableOutputKeepsLastCounts(t *testing.T) {
 	touch(t, filepath.Join(out, "Alpha", "ch0001.cbz"))
 	touch(t, filepath.Join(out, "Alpha", "ch0002.cbz"))
 	sc, st := newScanner(t, out)
-	if err := sc.ScanAll(ctx); err != nil {
+	if _, err := sc.ScanAll(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,7 +145,7 @@ func TestUnavailableOutputKeepsLastCounts(t *testing.T) {
 		"empty":   t.TempDir(), // an unmounted share leaves an empty mount point
 	} {
 		sc.Out = dir
-		if err := sc.ScanAll(ctx); !errors.Is(err, download.ErrOutputUnavailable) {
+		if _, err := sc.ScanAll(ctx); !errors.Is(err, download.ErrOutputUnavailable) {
 			t.Errorf("%s: ScanAll = %v, want ErrOutputUnavailable", name, err)
 		}
 		if err := sc.ScanOne(ctx, "a"); !errors.Is(err, download.ErrOutputUnavailable) {
@@ -150,4 +155,40 @@ func TestUnavailableOutputKeepsLastCounts(t *testing.T) {
 			t.Fatalf("%s: counts were zeroed: %v", name, got)
 		}
 	}
+}
+
+func TestScanWithNothingRecordedYet(t *testing.T) {
+	st := store.OpenFile(filepath.Join(t.TempDir(), "queue.json"))
+	sc := &Scanner{Store: st, Out: t.TempDir(), Format: "cbz"}
+	r, err := sc.ScanAll(context.Background())
+	if err != nil || r != (Result{}) {
+		t.Fatalf("ScanAll on an empty store = %+v, %v", r, err)
+	}
+}
+
+func TestRunPicksUpExpectationsWrittenLater(t *testing.T) {
+	out := t.TempDir()
+	touch(t, filepath.Join(out, "Alpha", "ch0001.cbz"))
+	st := store.OpenFile(filepath.Join(t.TempDir(), "queue.json"))
+	// A long Every proves it is the retry interval that finds the late data.
+	sc := &Scanner{Store: st, Out: out, Format: "cbz", Every: time.Hour, RetryEvery: 10 * time.Millisecond}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { sc.Run(ctx); close(done) }()
+
+	time.Sleep(50 * time.Millisecond) // the sync worker hasn't written anything yet
+	st.SetExpected(ctx, []store.Expected{{ID: "a", Title: "Alpha", Keys: []string{"0001", "0002"}}})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := st.Downloaded(ctx); got["a"] == 1 {
+			cancel()
+			<-done
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the scan never picked up expectations written after it started")
 }

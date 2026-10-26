@@ -50,6 +50,13 @@ func (c Config) sync(ctx context.Context, refresh bool) error {
 		if err := c.Progress.SetExpected(ctx, exp); err != nil {
 			return err
 		}
+		withKeys := 0
+		for _, e := range exp {
+			if len(e.Keys) > 0 {
+				withKeys++
+			}
+		}
+		log.Printf("Recorded expected chapters for %d title(s), %d with at least one chapter", len(exp), withKeys)
 	}
 	log.Printf("Synced %d title(s)", len(items))
 	return nil

@@ -73,21 +73,49 @@ func Count(out, format, title string, keys []string) (int, error) {
 	return n, nil
 }
 
+// Retry is how often the daemon looks again while no title has expected
+// chapters yet, which is the case until the sync worker has finished once.
+const Retry = time.Minute
+
+// Result summarises one scan.
+type Result struct {
+	Titles  int // series the sync worker recorded expectations for
+	WithKey int // of those, series with at least one expected chapter
+	OnDisk  int // of those, series with at least one chapter on disk
+	Changed int // series whose stored count changed
+}
+
+func (r Result) String() string {
+	return fmt.Sprintf("%d title(s) known, %d with expected chapters, %d with chapters on disk, %d count(s) changed",
+		r.Titles, r.WithKey, r.OnDisk, r.Changed)
+}
+
 // Scanner records how much of each series is on disk.
 type Scanner struct {
 	Store  store.Progress
 	Out    string
 	Format string // "cbz" or "dir"
+
+	// Every and RetryEvery override Interval and Retry (for tests).
+	Every, RetryEvery time.Duration
 }
 
-// ScanAll rescans every series. If the output directory is unavailable it
-// returns that error and leaves the stored counts as they were.
-func (s *Scanner) ScanAll(ctx context.Context) error {
+// ScanAll rescans every series and logs a summary. If the output directory is
+// unavailable it returns that error and leaves the stored counts as they were.
+func (s *Scanner) ScanAll(ctx context.Context) (Result, error) {
 	exp, err := s.Store.Expected(ctx)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
-	return s.scan(ctx, exp)
+	if len(exp) == 0 {
+		log.Print("progress scan: no expected chapters recorded yet; waiting for the sync worker")
+		return Result{}, nil
+	}
+	r, err := s.scan(ctx, exp)
+	if err == nil {
+		log.Printf("progress scan of %s: %s", s.Out, r)
+	}
+	return r, err
 }
 
 // ScanOne rescans one series, for use right after its download finished. A
@@ -99,49 +127,77 @@ func (s *Scanner) ScanOne(ctx context.Context, id string) error {
 	}
 	for _, e := range exp {
 		if e.ID == id {
-			return s.scan(ctx, []store.Expected{e})
+			if _, err := s.scan(ctx, []store.Expected{e}); err != nil {
+				return err
+			}
+			if done, err := s.Store.Downloaded(ctx); err == nil {
+				log.Printf("progress scan of %q: %d of %d expected chapters on disk", e.Title, done[id], len(e.Keys))
+			}
+			return nil
 		}
 	}
+	log.Printf("progress scan: %s has no expected chapters recorded yet; skipped", id)
 	return nil
 }
 
-func (s *Scanner) scan(ctx context.Context, exp []store.Expected) error {
+func (s *Scanner) scan(ctx context.Context, exp []store.Expected) (Result, error) {
+	r := Result{Titles: len(exp)}
 	if err := checkOut(s.Out); err != nil {
-		return err
+		return r, err
 	}
 	for _, e := range exp {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return r, ctx.Err()
 		}
+		if len(e.Keys) == 0 {
+			continue
+		}
+		r.WithKey++
 		n, err := Count(s.Out, s.Format, e.Title, e.Keys)
 		if err != nil {
 			log.Printf("scanning %q: %v", e.Title, err)
-			continue // keep its last count
+			r.OnDisk += min(e.Downloaded, 1) // keeps its last count
+			continue
+		}
+		if n > 0 {
+			r.OnDisk++
 		}
 		if n == e.Downloaded {
 			continue
 		}
 		if err := s.Store.SetDownloaded(ctx, e.ID, n); err != nil {
-			return err
+			return r, err
 		}
+		r.Changed++
 	}
-	return nil
+	return r, nil
 }
 
-// Run scans now and then every Interval until ctx is done.
+// Run scans now and then every Interval until ctx is done. While no title has
+// expected chapters yet it looks again every Retry, so the counts appear soon
+// after the sync worker's first run instead of up to Interval later.
 func (s *Scanner) Run(ctx context.Context) {
-	t := time.NewTicker(Interval)
-	defer t.Stop()
+	every, retry := s.Every, s.RetryEvery
+	if every == 0 {
+		every = Interval
+	}
+	if retry == 0 {
+		retry = Retry
+	}
 	for {
-		switch err := s.ScanAll(ctx); {
-		case err == nil, ctx.Err() != nil:
+		wait := every
+		switch r, err := s.ScanAll(ctx); {
+		case ctx.Err() != nil:
+			return
 		case errors.Is(err, download.ErrOutputUnavailable):
 			log.Printf("progress scan skipped, keeping the last counts: %v", err)
-		default:
+		case err != nil:
 			log.Printf("progress scan: %v", err)
+		case r.Titles == 0:
+			wait = retry
 		}
 		select {
-		case <-t.C:
+		case <-time.After(wait):
 		case <-ctx.Done():
 			return
 		}
