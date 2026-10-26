@@ -2,9 +2,11 @@ package mangadex
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -55,14 +57,36 @@ func TestMangaDetailsParsesMetadata(t *testing.T) {
 	}
 }
 
-func TestDownloadableChaptersReadsFeedTotal(t *testing.T) {
-	var query url.Values
+func chapterJSON(id, vol, ch string, pages int, ext string) string {
+	q := func(v string) string {
+		if v == "" {
+			return "null"
+		}
+		return `"` + v + `"`
+	}
+	return fmt.Sprintf(`{"id":%q,"attributes":{"volume":%s,"chapter":%s,"title":null,"pages":%d,"externalUrl":%s}}`,
+		id, q(vol), q(ch), pages, q(ext))
+}
+
+func TestDownloadableChaptersDedupesAcrossGroups(t *testing.T) {
+	var queries []url.Values
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/manga/a/feed" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		query = r.URL.Query()
-		w.Write([]byte(`{"total":42,"data":[]}`))
+		q := r.URL.Query()
+		queries = append(queries, q)
+		// Page 1 (3 entries) and page 2 (4 entries) of 7. Chapter 1 and 2 were uploaded by two groups each.
+		if q.Get("offset") == "0" {
+			fmt.Fprintf(w, `{"total":7,"data":[%s,%s,%s]}`,
+				chapterJSON("1a", "1", "1", 20, ""), chapterJSON("1b", "1", "1", 22, ""), chapterJSON("2a", "1", "2", 18, ""))
+			return
+		}
+		fmt.Fprintf(w, `{"total":7,"data":[%s,%s,%s,%s]}`,
+			chapterJSON("2b", "1", "2", 18, ""),
+			chapterJSON("ext", "1", "3", 0, "https://example.com/3"), // can't be downloaded
+			chapterJSON("2.5", "", "2.5", 10, ""),
+			chapterJSON("os", "", "", 30, "")) // one-shot
 	}))
 	defer api.Close()
 
@@ -70,14 +94,41 @@ func TestDownloadableChaptersReadsFeedTotal(t *testing.T) {
 	c.BaseURL = api.URL
 	c.APILimit = NewLimiter(time.Millisecond)
 
-	n, err := c.DownloadableChapters(context.Background(), "a", "en", []string{"safe"})
-	if err != nil || n != 42 {
-		t.Fatalf("DownloadableChapters = %d, %v, want 42", n, err)
+	chs, err := c.DownloadableChapters(context.Background(), "a", "en", []string{"safe"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if query.Get("limit") != "1" || query.Get("includeExternalUrl") != "0" || query.Get("includeEmptyPages") != "0" {
-		t.Errorf("feed query = %v, want limit=1 and external/empty chapters excluded", query)
+	var got []string
+	for _, ch := range chs {
+		got = append(got, ch.Volume+"/"+ch.Number)
 	}
-	if ok, err := c.HasDownloadable(context.Background(), "a", "en", nil); err != nil || !ok {
-		t.Errorf("HasDownloadable = %v, %v, want true", ok, err)
+	if want := []string{"1/1", "1/2", "/2.5", "/oneshot"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("chapters = %v, want %v (duplicates merged, external link dropped)", got, want)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("%d feed requests, want 2 pages", len(queries))
+	}
+	q := queries[0]
+	if q.Get("limit") != "500" || q.Get("includeExternalUrl") != "0" || q.Get("includeEmptyPages") != "0" ||
+		q.Get("translatedLanguage[]") != "en" || q.Get("contentRating[]") != "safe" {
+		t.Errorf("feed query = %v", q)
+	}
+}
+
+func TestChaptersKeepsExternalOnes(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("includeExternalUrl") != "" {
+			t.Errorf("Chapters must not filter external chapters: %v", r.URL.Query())
+		}
+		fmt.Fprintf(w, `{"total":2,"data":[%s,%s]}`, chapterJSON("e", "", "1", 0, "https://example.com"), chapterJSON("h", "", "1", 12, ""))
+	}))
+	defer api.Close()
+	c := NewClient(&http.Client{Timeout: 5 * time.Second})
+	c.BaseURL = api.URL
+	c.APILimit = NewLimiter(time.Millisecond)
+
+	chs, err := c.Chapters(context.Background(), "a", "en", nil)
+	if err != nil || len(chs) != 1 || chs[0].ID != "h" {
+		t.Fatalf("Chapters = %+v, %v; want the hosted copy to replace the external one", chs, err)
 	}
 }

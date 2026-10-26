@@ -140,6 +140,7 @@ func main() {
 		err = syncer.Run(ctx, syncer.Config{
 			Client:   c,
 			Library:  ps,
+			Progress: ps,
 			Cache:    ps.Blob("library_cache"),
 			Status:   *status,
 			Lang:     opts.Lang,

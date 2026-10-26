@@ -46,6 +46,16 @@ func TestPG(t *testing.T) {
 	})
 }
 
+func TestPGProgress(t *testing.T) {
+	storetest.RunProgress(t, func(t *testing.T) store.Progress {
+		s := open(t, "progress")
+		if err := s.SetExpected(context.Background(), nil); err != nil { // empty the table
+			t.Fatal(err)
+		}
+		return s
+	})
+}
+
 func TestTwoOwnersNeverShareAJob(t *testing.T) {
 	ctx := context.Background()
 	a, b := open(t, "a"), open(t, "b")

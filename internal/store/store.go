@@ -81,3 +81,28 @@ type Library interface {
 	// Library returns the listing and when it was last replaced (zero if never).
 	Library(ctx context.Context) (items []mangadex.Manga, synced time.Time, err error)
 }
+
+// Expected is the set of chapter files a series should have on disk, as the
+// sync worker last saw them, with how many the daemon found there.
+type Expected struct {
+	ID         string
+	Title      string   // the series folder is named after it (download.DirName)
+	Keys       []string // download.ChapterKey of each distinct downloadable chapter
+	Downloaded int      // how many of Keys were on disk at the last scan
+}
+
+// Progress persists what each library series should have on disk and how much
+// of it does. The sync worker writes the expectations; the daemon, which can see
+// the output directory, writes the counts.
+type Progress interface {
+	// SetExpected replaces the expectations for the whole library. Series not in
+	// it are dropped; series already known keep their Downloaded count.
+	SetExpected(ctx context.Context, items []Expected) error
+	// Expected returns every series' expectation, ordered by ID.
+	Expected(ctx context.Context) ([]Expected, error)
+	// SetDownloaded records how many of a series' chapters are on disk. Unknown
+	// series are ignored.
+	SetDownloaded(ctx context.Context, id string, n int) error
+	// Downloaded returns the recorded counts by series ID.
+	Downloaded(ctx context.Context) (map[string]int, error)
+}

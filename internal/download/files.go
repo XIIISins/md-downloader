@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/xiiisins/md-downloader/internal/mangadex"
 )
 
 func zipDir(dir, dst string) error {
@@ -64,6 +66,27 @@ func sanitize(s string) string {
 		s = s[:120]
 	}
 	return s
+}
+
+// DirName is the folder a series downloads into under the output directory.
+func DirName(title string) string { return sanitize(title) }
+
+// ChapterKey identifies a chapter's file: it downloads to "ch<key>.cbz" (or a
+// folder of that name). Chapters with the same number in different volumes share
+// a key, as they share a file name.
+func ChapterKey(number string) string { return padNumber(number) }
+
+// ChapterKeys returns the distinct file keys of chs, in order of first appearance.
+func ChapterKeys(chs []mangadex.Chapter) []string {
+	seen := make(map[string]bool, len(chs))
+	keys := make([]string, 0, len(chs))
+	for _, ch := range chs {
+		if k := ChapterKey(ch.Number); !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // padNumber zero-pads the integer part so folders sort correctly: "5.5" -> "0005.5".

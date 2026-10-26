@@ -18,6 +18,7 @@ import (
 type Config struct {
 	Client   *mangadex.Client // must be logged in
 	Library  store.Library
+	Progress store.Progress    // optional; receives each title's expected chapter files
 	Cache    library.Persister // survives restarts so a sync only fetches what is stale
 	Status   string
 	Lang     string
@@ -33,12 +34,22 @@ func (c Config) sync(ctx context.Context, refresh bool) error {
 	if err != nil {
 		return err
 	}
-	items, err := library.LoadItems(ctx, c.Client, ids, c.Lang, c.Ratings, library.LoadCache(c.Cache), refresh)
+	mc := library.LoadCache(c.Cache)
+	items, err := library.LoadItems(ctx, c.Client, ids, c.Lang, c.Ratings, mc, refresh)
 	if err != nil {
 		return err
 	}
 	if err := c.Library.ReplaceLibrary(ctx, items); err != nil {
 		return err
+	}
+	if c.Progress != nil {
+		exp := make([]store.Expected, len(items))
+		for i, it := range items {
+			exp[i] = store.Expected{ID: it.ID, Title: it.Title, Keys: mc.ChapterKeys(it.ID)}
+		}
+		if err := c.Progress.SetExpected(ctx, exp); err != nil {
+			return err
+		}
 	}
 	log.Printf("Synced %d title(s)", len(items))
 	return nil

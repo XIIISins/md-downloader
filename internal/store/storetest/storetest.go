@@ -109,3 +109,69 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		}
 	})
 }
+
+// RunProgress exercises a Progress. newStore must return a fresh, empty store each call.
+func RunProgress(t *testing.T, newStore func(t *testing.T) store.Progress) {
+	ctx := context.Background()
+	a := store.Expected{ID: "a", Title: "Alpha", Keys: []string{"0001", "0002.5"}}
+	b := store.Expected{ID: "b", Title: "Beta", Keys: []string{"oneshot"}}
+
+	t.Run("empty store", func(t *testing.T) {
+		s := newStore(t)
+		if got, err := s.Expected(ctx); err != nil || len(got) != 0 {
+			t.Fatalf("Expected = %v, %v", got, err)
+		}
+		if got, err := s.Downloaded(ctx); err != nil || len(got) != 0 {
+			t.Fatalf("Downloaded = %v, %v", got, err)
+		}
+	})
+
+	t.Run("expected round trip", func(t *testing.T) {
+		s := newStore(t)
+		if err := s.SetExpected(ctx, []store.Expected{b, a}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Expected(ctx)
+		if err != nil || len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" {
+			t.Fatalf("Expected = %+v, %v; want a then b", got, err)
+		}
+		if got[0].Title != "Alpha" || len(got[0].Keys) != 2 || got[0].Keys[1] != "0002.5" || got[0].Downloaded != 0 {
+			t.Errorf("a = %+v", got[0])
+		}
+	})
+
+	t.Run("downloaded survives a new expectation and unknown ids are ignored", func(t *testing.T) {
+		s := newStore(t)
+		s.SetExpected(ctx, []store.Expected{a, b})
+		if err := s.SetDownloaded(ctx, "a", 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetDownloaded(ctx, "nope", 5); err != nil {
+			t.Fatalf("unknown id: %v", err)
+		}
+		a2 := a
+		a2.Keys = []string{"0001", "0002.5", "0003"}
+		if err := s.SetExpected(ctx, []store.Expected{a2}); err != nil { // drops b
+			t.Fatal(err)
+		}
+		got, _ := s.Expected(ctx)
+		if len(got) != 1 || got[0].ID != "a" || len(got[0].Keys) != 3 || got[0].Downloaded != 1 {
+			t.Fatalf("Expected = %+v, want only a with 3 keys and 1 downloaded", got)
+		}
+		d, err := s.Downloaded(ctx)
+		if err != nil || len(d) != 1 || d["a"] != 1 {
+			t.Fatalf("Downloaded = %v, %v", d, err)
+		}
+	})
+
+	t.Run("nil keys", func(t *testing.T) {
+		s := newStore(t)
+		if err := s.SetExpected(ctx, []store.Expected{{ID: "c", Title: "C"}}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := s.Expected(ctx)
+		if len(got) != 1 || len(got[0].Keys) != 0 {
+			t.Fatalf("Expected = %+v", got)
+		}
+	})
+}
