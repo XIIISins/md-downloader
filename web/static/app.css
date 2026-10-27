@@ -56,7 +56,8 @@ main { padding: 0 var(--pad); }
 .grid.rows .art { grid-row: 1 / span 4; border-radius: 10px; }
 .grid.rows .t { font: 700 19px/1.25 var(--display); -webkit-line-clamp: 2; margin: 2px 0 0; letter-spacing: -.01em; }
 .grid.rows .m { white-space: normal; margin-top: 4px; }
-.grid.rows .plus { position: static; grid-column: 3; grid-row: 1; width: auto; height: 38px; border-radius: 999px; padding: 0 16px; gap: 6px; display: flex; align-items: center; background: var(--raise); box-shadow: none; backdrop-filter: none; font-weight: 600; font-size: 14px; }
+.grid.rows .acts { grid-column: 3; grid-row: 1; align-self: start; }
+.grid.rows .plus { position: static; width: auto; height: 38px; border-radius: 999px; padding: 0 16px; gap: 6px; display: flex; align-items: center; background: var(--raise); box-shadow: none; backdrop-filter: none; font-weight: 600; font-size: 14px; }
 .grid.rows .p[data-sel="1"] .art { box-shadow: none; }
 .grid.rows .p[data-sel="1"] { box-shadow: 0 0 0 2px var(--accent); }
 .sum { display: none; color: var(--text-2); font-size: 14px; max-width: 68ch; margin: 6px 0 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -94,7 +95,7 @@ main { padding: 0 var(--pad); }
   .bar { flex-wrap: wrap; } h1 { font-size: 26px; }
   .grid.posters { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px 12px; }
   .grid.rows .p { grid-template-columns: 84px minmax(0,1fr); }
-  .grid.rows .plus { grid-column: 2; grid-row: auto; justify-self: start; margin-top: 6px; }
+  .grid.rows .acts { grid-column: 2; grid-row: auto; justify-self: start; margin-top: 6px; }
   .grid.rows .art { grid-row: 1 / span 5; }
   .grid.list .p { grid-template-columns: 40px minmax(0,1fr) auto; } .grid.list .stat { display: none; }
 }
@@ -266,6 +267,11 @@ html { scrollbar-color: color-mix(in srgb, var(--text-3) 55%, var(--bg)) var(--b
 .search { min-width: 0; }
 .qstate span { white-space: nowrap; }
 .dialog .wrap > *, .spanel .row > * { min-width: 0; }
+.acts { display: flex; align-items: center; gap: 8px; }
+.md { display: inline-grid; place-items: center; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--raise); color: var(--text-2); font-weight: 700; font-size: 12.5px; letter-spacing: .04em; text-decoration: none; }
+.grid.rows .md { height: 38px; font-size: 14px; }
+.md:hover { color: var(--text); }
+.dialog .cta .md { height: auto; padding: 12px 22px; font-size: inherit; letter-spacing: 0; color: var(--text); }
 .plus:disabled { opacity: .35; cursor: default; }
 .picker .tag, .scheme span:last-child { overflow-wrap: anywhere; }
 
