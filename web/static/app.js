@@ -293,6 +293,8 @@ function dlCounts() {
   sel.value = S.dl; // re-sync the themed button's label
 }
 
+const mdUrl = (id) => `https://mangadex.org/title/${id}`;
+const mdLink = (it) => el('a', { className: 'md', href: mdUrl(it.id), target: '_blank', rel: 'noopener noreferrer', textContent: 'MD', title: 'Open on MangaDex', 'aria-label': `Open ${it.title} on MangaDex`, onclick: (e) => e.stopPropagation() });
 const metaLine = (it, withYear) => [it.rating ? `★ ${it.rating.toFixed(1)}` : '', it.chapters ? (it.downloaded > 0 ? `${it.downloaded}/${it.chapters} ch` : `${it.chapters} ch`) : '', withYear ? it.year || '' : '', cap(it.status)].filter(Boolean).join('  ·  ');
 
 function card(it) {
@@ -318,9 +320,8 @@ function card(it) {
     body.push(el('div', { className: 'rtags' }, ...it.tags.slice(0, 7).map((t) => el('span', { textContent: t }))));
   }
   li.append(...(S.view === 'posters' ? [el('div', { style: 'position:relative' }, art, plus), ...body]
-    : S.view === 'rows' ? [art, el('div', {}, ...body), plus]
-    : [art, el('div', {}, body[0], dl), el('span', { className: 'stat', textContent: meta }), plus]));
-  if (S.view === 'rows') plus.style.alignSelf = 'start';
+    : S.view === 'rows' ? [art, el('div', {}, ...body), el('div', { className: 'acts' }, mdLink(it), plus)]
+    : [art, el('div', {}, body[0], dl), el('span', { className: 'stat', textContent: meta }), el('div', { className: 'acts' }, mdLink(it), plus)]));
   return li;
 }
 
@@ -393,7 +394,7 @@ function openDetail(it, from) {
   d.replaceChildren(back, x, el('div', { className: 'wrap' }, el('img', { alt: '', src: cover(it.id) }),
     el('div', {}, el('h2', { textContent: it.title }), facts, status, el('p', { className: 'desc', textContent: it.description || 'No summary.' }),
       el('div', { className: 'rtags' }, ...it.tags.map((t) => el('span', { textContent: t }))),
-      el('div', { className: 'cta' }, main, el('button', { type: 'button', textContent: 'Close', onclick: closeDetail })))));
+      el('div', { className: 'cta' }, main, mdLink(it), el('button', { type: 'button', textContent: 'Close', onclick: closeDetail })))));
   d.hidden = false; $('#scrim').hidden = false; d.scrollTop = 0; x.focus();
 }
 function closeDetail() {
